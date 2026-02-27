@@ -157,6 +157,39 @@ button:disabled {
     filter: blur(1px);
 }
 
+.ios-tab-switch {
+    transition: background-color var(--ios-normal) var(--ios-ease), box-shadow var(--ios-normal) var(--ios-ease);
+}
+
+.ios-tab-pane {
+    position: absolute;
+    inset: 0;
+    transition:
+        transform var(--ios-slow) var(--ios-ease),
+        opacity var(--ios-normal) var(--ios-ease),
+        filter var(--ios-normal) var(--ios-ease);
+    will-change: transform, opacity;
+}
+
+.ios-tab-pane-active {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+    pointer-events: auto;
+}
+
+.ios-tab-pane-hidden-left {
+    opacity: 0;
+    transform: translateX(-24px) scale(0.995);
+    filter: blur(1px);
+}
+
+.ios-tab-pane-hidden-right {
+    opacity: 0;
+    transform: translateX(24px) scale(0.995);
+    filter: blur(1px);
+}
+
 .leaflet-container {
     transition: filter var(--ios-normal) var(--ios-ease), transform var(--ios-normal) var(--ios-ease);
 }
@@ -228,5 +261,13 @@ button:disabled {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
+    }
+}
+
+@media (max-width: 640px) {
+    input,
+    select,
+    textarea {
+        font-size: 16px;
     }
 }

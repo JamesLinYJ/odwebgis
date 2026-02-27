@@ -527,7 +527,9 @@ function AdminApp() {
                 scale: 2,
                 map: format === "png" ? mapRef.current : null,
                 baseMapMode,
-                mapScale: 1.5,
+                mapScale: 2.2,
+                qualityScale: 1.8,
+                labelLimit: 160,
             });
             api.notify(format === "svg" ? "OD 图 SVG 已导出" : "OD 图 PNG 已导出");
         } catch (err) {

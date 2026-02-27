@@ -4,8 +4,8 @@
     }
 
     function safeNumber(value, fallback = 0) {
-        const num = Number(value);
-        return Number.isFinite(num) ? num : fallback;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
     }
 
     function escapeXml(text) {
@@ -44,7 +44,7 @@
                     destination_lat: destinationLat,
                     destination_lon: destinationLon,
                     category: route.category || "未分类",
-                    user_name: route.user_name || "",
+                    user_name: route.user_name || route.username || "",
                     created_at: route.created_at || "",
                 };
             })
@@ -113,14 +113,16 @@
         };
     }
 
-    function makeCurvePath(x1, y1, x2, y2) {
+    function makeCurveGeometry(x1, y1, x2, y2) {
         const dx = x2 - x1;
         const dy = y2 - y1;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         const offset = Math.max(12, dist * 0.2);
         const cx = (x1 + x2) / 2 + (dy / dist) * offset;
         const cy = (y1 + y2) / 2 - (dx / dist) * offset;
-        return `M ${x1.toFixed(2)} ${y1.toFixed(2)} Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+        const mx = 0.25 * x1 + 0.5 * cx + 0.25 * x2;
+        const my = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
+        return { cx, cy, mx, my };
     }
 
     function buildCategoryLegend(routes) {
@@ -133,6 +135,13 @@
         return Array.from(byCategory.entries()).sort((a, b) => b[1].count - a[1].count);
     }
 
+    function pickLabeledRoutes(routes, limit) {
+        const rows = routes
+            .filter((r) => String(r.user_name || "").trim())
+            .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+        return rows.slice(0, limit);
+    }
+
     function createPosterSvg(inputRoutes, options = {}) {
         const routes = normalizeRoutes(inputRoutes).slice(0, clamp(safeNumber(options.maxRoutes, 900), 20, 2500));
         if (!routes.length) throw new Error("没有可导出的 OD 线路");
@@ -140,9 +149,10 @@
         const width = clamp(safeNumber(options.width, 1920), 960, 4096);
         const height = clamp(safeNumber(options.height, 1080), 600, 4096);
         const title = options.title || "OD 流向图";
-        const subtitle = options.subtitle || "WebGIS 教学导出";
+        const subtitle = options.subtitle || "WebGIS 导出";
         const owner = options.owner || "";
         const categoryColors = options.categoryColors || {};
+        const labelLimit = clamp(safeNumber(options.labelLimit, 90), 0, 220);
 
         const pad = 52;
         const headerH = 120;
@@ -158,22 +168,27 @@
         const bounds = computeBounds(routes);
         const project = makeProjector(bounds, mapX + 22, mapY + 22, mapW - 44, mapH - 44);
 
-        const drawRoutes = [...routes];
         const linePaths = [];
         const points = [];
-        drawRoutes.forEach((route, idx) => {
+        const labels = [];
+        routes.forEach((route, idx) => {
             const [x1, y1] = project(route.origin_lat, route.origin_lon);
             const [x2, y2] = project(route.destination_lat, route.destination_lon);
-            const lineWidth = 2.4;
-            const opacity = 0.72;
+            const { cx, cy, mx, my } = makeCurveGeometry(x1, y1, x2, y2);
             const color = colorForCategory(route.category, idx, categoryColors);
             linePaths.push(
-                `<path d="${makeCurvePath(x1, y1, x2, y2)}" stroke="${escapeXml(color)}" stroke-width="${lineWidth.toFixed(2)}" stroke-linecap="round" fill="none" opacity="${opacity.toFixed(3)}"/>`
+                `<path d="M ${x1.toFixed(2)} ${y1.toFixed(2)} Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${x2.toFixed(2)} ${y2.toFixed(2)}" stroke="${escapeXml(color)}" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.76"/>`
             );
             points.push(
-                `<circle cx="${x1.toFixed(2)}" cy="${y1.toFixed(2)}" r="3.2" fill="${escapeXml(colorWithAlpha(color, 0.82))}"/>`,
+                `<circle cx="${x1.toFixed(2)}" cy="${y1.toFixed(2)}" r="3.1" fill="${escapeXml(colorWithAlpha(color, 0.78))}"/>`,
                 `<circle cx="${x2.toFixed(2)}" cy="${y2.toFixed(2)}" r="3.6" fill="${escapeXml(color)}"/>`
             );
+            if (idx < labelLimit && route.user_name) {
+                const txt = escapeXml(route.user_name);
+                labels.push(
+                    `<text x="${mx.toFixed(2)}" y="${(my - 8).toFixed(2)}" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a" stroke="#ffffff" stroke-width="3" paint-order="stroke">${txt}</text>`
+                );
+            }
         });
 
         const legendItems = buildCategoryLegend(routes).slice(0, 8);
@@ -189,16 +204,17 @@
             );
         }).join("");
 
-        const topRoutes = [...routes]
+        const latestRoutes = [...routes]
             .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
             .slice(0, 6);
-        const topRows = topRoutes.map((route, idx) => {
+        const latestRows = latestRoutes.map((route, idx) => {
             const y = sideY + sideH - 182 + idx * 28;
             return `<text x="${sideX + 20}" y="${y}" font-size="14" fill="#334155">${idx + 1}. ${escapeXml(routeLabel(route))}</text>`;
         }).join("");
 
         const nowText = new Date().toLocaleString("zh-CN", { hour12: false });
         const ownerText = owner ? ` | 导出用户：${owner}` : "";
+        const labelStat = pickLabeledRoutes(routes, labelLimit).length;
 
         return (
             `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
@@ -240,16 +256,17 @@
 
             `<g>${linePaths.join("")}</g>` +
             `<g>${points.join("")}</g>` +
+            `<g>${labels.join("")}</g>` +
 
             `<text x="${sideX + 20}" y="${sideY + 46}" font-size="26" font-weight="900" fill="#1e3a8a">导出摘要</text>` +
             `<text x="${sideX + 20}" y="${sideY + 84}" font-size="16" fill="#334155">线路总数：${escapeXml(String(routes.length))} 条</text>` +
-            `<text x="${sideX + 20}" y="${sideY + 112}" font-size="16" fill="#334155">底图模式：${escapeXml(options.baseMapMode === "satellite" ? "卫星影像" : "矢量地图")}</text>` +
+            `<text x="${sideX + 20}" y="${sideY + 112}" font-size="16" fill="#334155">标注人名：${escapeXml(String(labelStat))}</text>` +
             `<text x="${sideX + 20}" y="${sideY + 140}" font-size="16" fill="#334155">经度范围：${bounds.minLon.toFixed(2)} ~ ${bounds.maxLon.toFixed(2)}</text>` +
             `<text x="${sideX + 20}" y="${sideY + 168}" font-size="16" fill="#334155">纬度范围：${bounds.minLat.toFixed(2)} ~ ${bounds.maxLat.toFixed(2)}</text>` +
             `<text x="${sideX + 20}" y="${sideY + 214}" font-size="20" font-weight="800" fill="#1e3a8a">分类统计</text>` +
             `${legendSvg}` +
             `<text x="${sideX + 20}" y="${sideY + sideH - 208}" font-size="20" font-weight="800" fill="#1e3a8a">最近路线</text>` +
-            `${topRows}` +
+            `${latestRows}` +
             `</svg>`
         );
     }
@@ -285,6 +302,8 @@
             URL.revokeObjectURL(url);
             throw new Error("浏览器不支持 Canvas 导出");
         }
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         ctx.scale(scale, scale);
         ctx.drawImage(img, 0, 0, width, height);
         URL.revokeObjectURL(url);
@@ -302,9 +321,9 @@
 
     async function waitForMapStable(map) {
         if (!map) return;
-        await wait(120);
+        await wait(140);
         await new Promise((resolve) => map.whenReady(resolve));
-        await wait(120);
+        await wait(140);
     }
 
     function drawRoundedRect(ctx, x, y, w, h, r) {
@@ -318,7 +337,7 @@
         ctx.closePath();
     }
 
-    function routeLinePoints(route, map) {
+    function routeCurvePoints(route, map) {
         const p1 = map.latLngToContainerPoint([route.origin_lat, route.origin_lon]);
         const p2 = map.latLngToContainerPoint([route.destination_lat, route.destination_lon]);
         const dx = p2.x - p1.x;
@@ -327,20 +346,19 @@
         const offset = Math.max(12, dist * 0.2);
         const cx = (p1.x + p2.x) / 2 + (dy / dist) * offset;
         const cy = (p1.y + p2.y) / 2 - (dx / dist) * offset;
-        return { p1, p2, c: { x: cx, y: cy } };
+        const mx = 0.25 * p1.x + 0.5 * cx + 0.25 * p2.x;
+        const my = 0.25 * p1.y + 0.5 * cy + 0.25 * p2.y;
+        return { p1, p2, c: { x: cx, y: cy }, m: { x: mx, y: my } };
     }
 
-    async function drawLeafletTiles(ctx, map, mapX, mapY, drawScale) {
+    async function drawLeafletTiles(ctx, map, mapX, mapY, drawScale, cornerRadius) {
         const container = map.getContainer();
         const mapRect = container.getBoundingClientRect();
         const tileImages = Array.from(container.querySelectorAll(".leaflet-tile-pane img.leaflet-tile"));
         if (!tileImages.length) throw new Error("未找到底图瓦片，无法导出底图");
 
         ctx.save();
-        const mapW = mapRect.width * drawScale;
-        const mapH = mapRect.height * drawScale;
-        ctx.beginPath();
-        ctx.rect(mapX, mapY, mapW, mapH);
+        drawRoundedRect(ctx, mapX, mapY, mapRect.width * drawScale, mapRect.height * drawScale, cornerRadius);
         ctx.clip();
 
         tileImages.forEach((img) => {
@@ -359,6 +377,33 @@
         ctx.restore();
     }
 
+    function drawNameTag(ctx, text, x, y, mapX, mapY, mapW, mapH, scale) {
+        const clean = String(text || "").trim();
+        if (!clean) return;
+        if (x < mapX + 12 * scale || x > mapX + mapW - 12 * scale) return;
+        if (y < mapY + 12 * scale || y > mapY + mapH - 12 * scale) return;
+        const clipped = clean.length > 14 ? `${clean.slice(0, 13)}...` : clean;
+        ctx.font = `700 ${Math.round(10.5 * scale)}px "MiSans","Microsoft YaHei",sans-serif`;
+        const textW = ctx.measureText(clipped).width;
+        const padX = 6 * scale;
+        const boxW = textW + padX * 2;
+        const boxH = 16 * scale;
+        const bx = x - boxW / 2;
+        const by = y - boxH - 4 * scale;
+
+        ctx.save();
+        drawRoundedRect(ctx, bx, by, boxW, boxH, 6 * scale);
+        ctx.fillStyle = "rgba(255,255,255,0.88)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(59,130,246,0.32)";
+        ctx.lineWidth = 1 * scale;
+        ctx.stroke();
+        ctx.fillStyle = "#0f172a";
+        ctx.textBaseline = "middle";
+        ctx.fillText(clipped, bx + padX, by + boxH / 2);
+        ctx.restore();
+    }
+
     async function renderMapPosterCanvas(map, inputRoutes, options = {}) {
         const routes = normalizeRoutes(inputRoutes).slice(0, clamp(safeNumber(options.maxRoutes, 900), 20, 2500));
         if (!routes.length) throw new Error("没有可导出的 OD 线路");
@@ -371,7 +416,11 @@
             throw new Error("地图尺寸异常，无法导出");
         }
 
-        const drawScale = clamp(safeNumber(options.mapScale, 1.5), 1, 2.5);
+        const mapScale = clamp(safeNumber(options.mapScale, 2.2), 1.2, 4);
+        const dpr = (typeof window !== "undefined" && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+        const qualityScale = clamp(safeNumber(options.qualityScale, dpr), 1, 2);
+        const drawScale = clamp(mapScale * qualityScale, 1.4, 5);
+
         const pad = 28 * drawScale;
         const headerH = 88 * drawScale;
         const mapW = mapSize.x * drawScale;
@@ -384,12 +433,15 @@
         const sideX = mapX + mapW + pad;
         const sideY = mapY;
         const sideH = mapH;
+        const cornerRadius = 22 * drawScale;
 
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(2, Math.round(width));
         canvas.height = Math.max(2, Math.round(height));
         const ctx = canvas.getContext("2d");
         if (!ctx) throw new Error("浏览器不支持 Canvas 导出");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
 
         const bgGrad = ctx.createLinearGradient(0, 0, width, height);
         bgGrad.addColorStop(0, "#f7fbff");
@@ -407,24 +459,24 @@
         ctx.arc(width * 0.76, height * 0.78, height * 0.25, 0, Math.PI * 2);
         ctx.fill();
 
-        drawRoundedRect(ctx, mapX, mapY, mapW, mapH, 22 * drawScale);
+        drawRoundedRect(ctx, mapX, mapY, mapW, mapH, cornerRadius);
         ctx.fillStyle = "#ffffff";
         ctx.fill();
         ctx.strokeStyle = "#bfdbfe";
         ctx.lineWidth = 1.2 * drawScale;
         ctx.stroke();
 
-        drawRoundedRect(ctx, sideX, sideY, sideW, sideH, 22 * drawScale);
+        drawRoundedRect(ctx, sideX, sideY, sideW, sideH, cornerRadius);
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.fill();
         ctx.strokeStyle = "#bfdbfe";
         ctx.lineWidth = 1.2 * drawScale;
         ctx.stroke();
 
-        await drawLeafletTiles(ctx, map, mapX, mapY, drawScale);
+        await drawLeafletTiles(ctx, map, mapX, mapY, drawScale, cornerRadius);
 
         ctx.save();
-        drawRoundedRect(ctx, mapX, mapY, mapW, mapH, 22 * drawScale);
+        drawRoundedRect(ctx, mapX, mapY, mapW, mapH, cornerRadius);
         ctx.clip();
         const overlay = ctx.createLinearGradient(mapX, mapY, mapX + mapW, mapY + mapH);
         overlay.addColorStop(0, "rgba(30,64,175,0.06)");
@@ -434,13 +486,9 @@
         ctx.restore();
 
         const categoryColors = options.categoryColors || {};
-        const drawRoutes = [...routes];
-        drawRoutes.forEach((route, idx) => {
-            const lineWidth = 3.2 * drawScale;
-            const opacity = 0.74;
+        routes.forEach((route, idx) => {
             const color = colorForCategory(route.category, idx, categoryColors);
-            const { p1, p2, c } = routeLinePoints(route, map);
-
+            const { p1, p2, c } = routeCurvePoints(route, map);
             ctx.beginPath();
             ctx.moveTo(mapX + p1.x * drawScale, mapY + p1.y * drawScale);
             ctx.quadraticCurveTo(
@@ -449,8 +497,8 @@
                 mapX + p2.x * drawScale,
                 mapY + p2.y * drawScale
             );
-            ctx.strokeStyle = colorWithAlpha(color, opacity);
-            ctx.lineWidth = lineWidth;
+            ctx.strokeStyle = colorWithAlpha(color, 0.74);
+            ctx.lineWidth = 3.2 * drawScale;
             ctx.lineCap = "round";
             ctx.stroke();
 
@@ -458,6 +506,22 @@
             ctx.fillStyle = colorWithAlpha(color, 0.95);
             ctx.arc(mapX + p2.x * drawScale, mapY + p2.y * drawScale, 4 * drawScale, 0, Math.PI * 2);
             ctx.fill();
+        });
+
+        const labelLimit = clamp(safeNumber(options.labelLimit, 90), 0, 220);
+        pickLabeledRoutes(routes, labelLimit).forEach((route) => {
+            const { m } = routeCurvePoints(route, map);
+            drawNameTag(
+                ctx,
+                route.user_name,
+                mapX + m.x * drawScale,
+                mapY + m.y * drawScale,
+                mapX,
+                mapY,
+                mapW,
+                mapH,
+                drawScale
+            );
         });
 
         const owner = options.owner ? ` | 导出用户：${options.owner}` : "";
@@ -481,7 +545,7 @@
         ctx.fillStyle = "#334155";
         ctx.font = `${Math.round(14 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
         ctx.fillText(`线路总数：${routes.length} 条`, sideX + 18 * drawScale, sideY + 62 * drawScale);
-        ctx.fillText(`覆盖分类：${buildCategoryLegend(routes).length} 项`, sideX + 18 * drawScale, sideY + 86 * drawScale);
+        ctx.fillText(`标注人名：${pickLabeledRoutes(routes, labelLimit).length}`, sideX + 18 * drawScale, sideY + 86 * drawScale);
         ctx.fillText(`底图模式：${options.baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}`, sideX + 18 * drawScale, sideY + 110 * drawScale);
 
         ctx.fillStyle = "#1e3a8a";
@@ -506,7 +570,7 @@
             ctx.fillText(txt, sideX + sideW - 16 * drawScale - txtW, y);
         });
 
-        const topRoutes = [...routes]
+        const latestRoutes = [...routes]
             .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
             .slice(0, 7);
         const topHeadY = sideY + sideH - 220 * drawScale;
@@ -515,7 +579,7 @@
         ctx.fillText("最近路线", sideX + 18 * drawScale, topHeadY);
         ctx.fillStyle = "#334155";
         ctx.font = `${Math.round(12 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        topRoutes.forEach((route, idx) => {
+        latestRoutes.forEach((route, idx) => {
             const y = topHeadY + 24 * drawScale + idx * 22 * drawScale;
             const label = `${idx + 1}. ${routeLabel(route)}`;
             const clipped = label.length > 38 ? `${label.slice(0, 37)}...` : label;
@@ -555,7 +619,7 @@
             return;
         }
 
-        const pngBlob = await svgToPngBlob(svgText, width, height, clamp(safeNumber(options.scale, 2), 1, 4));
+        const pngBlob = await svgToPngBlob(svgText, width, height, clamp(safeNumber(options.scale, 2.4), 1, 5));
         downloadBlob(pngBlob, `${filename}.png`);
     }
 
