@@ -1225,6 +1225,28 @@ def create_app() -> Flask:
         db.commit()
         return jsonify({"ok": True})
 
+    @app.delete("/api/admin/accounts/<int:account_id>/routes")
+    def admin_delete_account_routes(account_id: int) -> Any:
+        admin_user, err = require_admin()
+        if err:
+            return err
+
+        db = get_db()
+        target = db.execute(
+            "SELECT id, user_type FROM users WHERE id = ?",
+            (account_id,),
+        ).fetchone()
+        if target is None:
+            return jsonify({"ok": False, "message": "账户不存在"}), 404
+
+        cur = db.execute("DELETE FROM od_routes WHERE user_id = ?", (account_id,))
+        db.execute(
+            "UPDATE users SET last_active_at = ? WHERE id = ?",
+            (utc_now_text(), int(admin_user["id"])),
+        )
+        db.commit()
+        return jsonify({"ok": True, "deleted_count": int(cur.rowcount or 0)})
+
     @app.post("/api/admin/accounts/<int:account_id>/reset-password")
     def admin_reset_password(account_id: int) -> Any:
         admin_user, err = require_admin()

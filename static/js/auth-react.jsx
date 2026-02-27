@@ -46,7 +46,7 @@ function AuthApp() {
                 window.location.href = user.user_type === "admin" ? "/admin" : "/";
             })
             .catch(() => {
-                // ignore
+                // not logged in
             });
     }, []);
 
@@ -108,7 +108,7 @@ function AuthApp() {
     }
 
     return (
-        <div className="mx-auto flex min-h-screen max-w-[620px] items-center justify-center p-3 sm:p-5 ios-fade-up">
+        <div className="mx-auto flex min-h-screen max-w-[560px] items-center justify-center p-3 sm:p-5 ios-fade-up">
             <div className="ios-card w-full overflow-hidden rounded-3xl border border-blue-100 bg-white/95 shadow-soft">
                 <section className="p-5 sm:p-8">
                     <div className="mb-1 text-2xl font-black text-blue-700">账户入口</div>
@@ -131,7 +131,7 @@ function AuthApp() {
                         </button>
                     </div>
 
-                    <div className="relative min-h-[320px] overflow-hidden">
+                    <div className="relative min-h-[340px] overflow-hidden" style={{ minHeight: "340px" }}>
                         <form
                             onSubmit={submitLogin}
                             className={`ios-tab-pane ${tab === "login" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-left pointer-events-none"}`}
@@ -232,4 +232,9 @@ function AuthApp() {
     );
 }
 
-ReactDOM.createRoot(document.getElementById("app")).render(<AuthApp />);
+const authRootNode = document.getElementById("app");
+if (ReactDOM.createRoot) {
+    ReactDOM.createRoot(authRootNode).render(<AuthApp />);
+} else {
+    ReactDOM.render(<AuthApp />, authRootNode);
+}

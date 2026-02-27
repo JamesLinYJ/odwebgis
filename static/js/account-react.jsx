@@ -111,7 +111,7 @@ function AccountApp() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <div className="text-2xl font-black text-blue-700">账户中心</div>
-                        <div className="text-xs font-semibold text-slate-500">独立页面</div>
+                        <div className="text-xs font-semibold text-slate-500">单独页面</div>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
@@ -142,7 +142,7 @@ function AccountApp() {
                             <div className="mt-1 text-xs font-semibold text-slate-600">角色：{user.user_type === "admin" ? "管理员" : "学生"}</div>
                             {user.must_change_password && (
                                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">
-                                    当前账户需先修改密码
+                                    当前账户需要先修改密码
                                 </div>
                             )}
                             {user.is_system_admin && (
@@ -195,4 +195,9 @@ function AccountApp() {
     );
 }
 
-ReactDOM.createRoot(document.getElementById("app")).render(<AccountApp />);
+const accountRootNode = document.getElementById("app");
+if (ReactDOM.createRoot) {
+    ReactDOM.createRoot(accountRootNode).render(<AccountApp />);
+} else {
+    ReactDOM.render(<AccountApp />, accountRootNode);
+}

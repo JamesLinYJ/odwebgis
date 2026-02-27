@@ -28,7 +28,6 @@ function PasswordStrengthBar({ password, username = "" }) {
 function AdminAccountsApp() {
     const [loading, setLoading] = useState(true);
     const [accounts, setAccounts] = useState([]);
-    const [me, setMe] = useState(null);
 
     const [filter, setFilter] = useState({ q: "", user_type: "all" });
     const [form, setForm] = useState({
@@ -58,13 +57,11 @@ function AdminAccountsApp() {
         });
     }, [accounts, filter]);
 
-    async function loadMe() {
+    async function loadMeAndGuard() {
         const res = await api.get("/api/auth/me");
         const user = res.user || null;
         if (!user) throw new Error("未登录");
         if (user.user_type !== "admin") throw new Error("无管理员权限");
-        setMe(user);
-        return user;
     }
 
     async function loadAccounts() {
@@ -79,7 +76,7 @@ function AdminAccountsApp() {
     async function bootstrap() {
         setLoading(true);
         try {
-            await loadMe();
+            await loadMeAndGuard();
             await loadAccounts();
         } catch (err) {
             const msg = err.message || "";
@@ -144,7 +141,7 @@ function AdminAccountsApp() {
 
     async function removeAccount(acc) {
         const target = `${acc.name}（${acc.username || acc.student_no || "-"}）`;
-        if (!window.confirm(`确认删除账户 ${target}？此操作会同时删除该账户的所有线路数据。`)) {
+        if (!window.confirm(`确认删除账户 ${target}？此操作会删除该账户的所有线路数据。`)) {
             return;
         }
         setDeleteBusyId(acc.id);
@@ -198,7 +195,7 @@ function AdminAccountsApp() {
             await api.postJsonSecure(`/api/admin/accounts/${resetModal.account.id}/reset-password`, {
                 new_password: resetModal.password,
             });
-            api.notify("密码已重置，目标账户下次登录需改密");
+            api.notify("密码已重置，目标账户下次登录需修改密码");
             closeResetModal();
             await loadAccounts();
         } catch (err) {
@@ -424,4 +421,9 @@ function AdminAccountsApp() {
     );
 }
 
-ReactDOM.createRoot(document.getElementById("app")).render(<AdminAccountsApp />);
+const adminAccountsRootNode = document.getElementById("app");
+if (ReactDOM.createRoot) {
+    ReactDOM.createRoot(adminAccountsRootNode).render(<AdminAccountsApp />);
+} else {
+    ReactDOM.render(<AdminAccountsApp />, adminAccountsRootNode);
+}

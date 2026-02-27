@@ -850,4 +850,9 @@ function ExplorerApp() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("app")).render(<ExplorerApp />);
+const explorerRootNode = document.getElementById("app");
+if (ReactDOM.createRoot) {
+    ReactDOM.createRoot(explorerRootNode).render(<ExplorerApp />);
+} else {
+    ReactDOM.render(<ExplorerApp />, explorerRootNode);
+}

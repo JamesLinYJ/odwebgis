@@ -40,7 +40,9 @@ source "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 
-chmod +x setup_linux.sh start_linux.sh cleanup_linux.sh manage_map_key.sh deploy_linux_oneclick.sh || true
+chmod +x setup_linux.sh start_linux.sh cleanup_linux.sh uninstall_linux.sh manage_map_key.sh deploy_linux_oneclick.sh build_tailwind.sh || true
 
 echo "[OK] Linux environment is ready."
 echo "[TIP] Start service: ./start_linux.sh"
+echo "[TIP] Build Tailwind CSS: ./build_tailwind.sh"
+echo "[TIP] Uninstall: ./uninstall_linux.sh"

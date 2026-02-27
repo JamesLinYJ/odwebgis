@@ -24,19 +24,19 @@ stop_service() {
 }
 
 clean_runtime() {
-  rm -f run_stdout.log run_stderr.log
+  rm -f run_stdout.log run_stderr.log 2>/dev/null || true
   if [[ -d "$LOG_DIR" ]]; then
-    rm -rf "$LOG_DIR"
+    rm -rf "$LOG_DIR" 2>/dev/null || true
   fi
   find . -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
 }
 
 clean_all() {
   clean_runtime
-  rm -rf .venv
-  rm -f webgis.db
-  rm -f .tianditu_key
-  rm -f "$ENV_FILE"
+  rm -rf .venv 2>/dev/null || true
+  rm -f webgis.db 2>/dev/null || true
+  rm -f .tianditu_key 2>/dev/null || true
+  rm -f "$ENV_FILE" 2>/dev/null || true
 }
 
 MODE="${1:-runtime}"

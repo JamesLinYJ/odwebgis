@@ -8,3 +8,4 @@ run_stdout.log
 run_stderr.log
 *.pyc
 webgis.db
+tools/tailwindcss-linux-*

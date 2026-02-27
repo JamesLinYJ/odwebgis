@@ -19,6 +19,20 @@ fi
 HOST="${WEBGIS_HOST:-0.0.0.0}"
 PORT="${WEBGIS_PORT:-5000}"
 
+service_ready() {
+  python - <<'PY' >/dev/null 2>&1
+import os, urllib.request, urllib.error
+port = os.environ.get('WEBGIS_PORT', '5000')
+try:
+    with urllib.request.urlopen(f'http://127.0.0.1:{port}/auth', timeout=1.5) as r:
+        raise SystemExit(0 if r.status == 200 else 1)
+except urllib.error.HTTPError as e:
+    raise SystemExit(0 if e.code == 200 else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 if [[ ! -f "$VENV_DIR/bin/activate" ]]; then
   echo "[ERROR] Virtual env not found: $VENV_DIR"
   echo "[TIP] Run ./setup_linux.sh first"
@@ -31,9 +45,17 @@ source "$VENV_DIR/bin/activate"
 if [[ -f "$PID_FILE" ]]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
   if [[ -n "${OLD_PID:-}" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
-    echo "[INFO] WebGIS already running, PID=$OLD_PID"
-    echo "[INFO] URL: http://127.0.0.1:${PORT}"
-    exit 0
+    CMDLINE="$(tr '\0' ' ' <"/proc/${OLD_PID}/cmdline" 2>/dev/null || true)"
+    if [[ "$CMDLINE" == *"app.py"* ]]; then
+      if service_ready; then
+        echo "[INFO] WebGIS already running, PID=$OLD_PID"
+        echo "[INFO] URL: http://127.0.0.1:${PORT}"
+        exit 0
+      fi
+      echo "[WARN] PID file points to app.py process but service is unhealthy; restarting."
+    else
+      echo "[WARN] Stale PID file detected (PID=$OLD_PID), cleaning."
+    fi
   fi
   rm -f "$PID_FILE"
 fi
@@ -51,17 +73,7 @@ for _ in $(seq 1 60); do
   if ! kill -0 "$NEW_PID" 2>/dev/null; then
     break
   fi
-  if python - <<'PY' >/dev/null 2>&1
-import urllib.request, urllib.error
-try:
-    with urllib.request.urlopen('http://127.0.0.1:' + __import__('os').environ.get('WEBGIS_PORT','5000') + '/auth', timeout=1.5) as r:
-        raise SystemExit(0 if r.status == 200 else 1)
-except urllib.error.HTTPError as e:
-    raise SystemExit(0 if e.code == 200 else 1)
-except Exception:
-    raise SystemExit(1)
-PY
-  then
+  if service_ready; then
     echo "[OK] WebGIS started, PID=$NEW_PID"
     echo "[OK] URL: http://127.0.0.1:${PORT}"
     echo "[INFO] Logs: ${LOG_DIR}/webgis.out.log, ${LOG_DIR}/webgis.err.log"

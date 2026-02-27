@@ -81,6 +81,16 @@ function AdminApp() {
     const [accountSubmitting, setAccountSubmitting] = useState(false);
     const [accountResetBusyId, setAccountResetBusyId] = useState(null);
     const [accountDeleteBusyId, setAccountDeleteBusyId] = useState(null);
+    const [routeDeleteBusyId, setRouteDeleteBusyId] = useState(null);
+    const [deleteUserRoutesBusy, setDeleteUserRoutesBusy] = useState(false);
+    const [detailCardScale, setDetailCardScale] = useState(1);
+    const [studentContextMenu, setStudentContextMenu] = useState({
+        open: false,
+        x: 0,
+        y: 0,
+        user: null,
+        routeId: "",
+    });
     const [passwordPanelOpen, setPasswordPanelOpen] = useState(false);
     const [passwordSubmitting, setPasswordSubmitting] = useState(false);
     const [passwordForm, setPasswordForm] = useState({
@@ -101,6 +111,12 @@ function AdminApp() {
         if (!selectedUserId) return [];
         return allRoutes.filter((r) => Number(r.user_id) === Number(selectedUserId));
     }, [allRoutes, selectedUserId]);
+
+    const contextUserRoutes = useMemo(() => {
+        const uid = Number(studentContextMenu.user?.id || 0);
+        if (!uid) return [];
+        return allRoutes.filter((r) => Number(r.user_id) === uid);
+    }, [allRoutes, studentContextMenu.user]);
 
     const categoryOptions = useMemo(() => {
         const base = onlySelectedStudent ? selectedStudentRoutesFromAll : allRoutes;
@@ -203,6 +219,7 @@ function AdminApp() {
             setSelectedUser(null);
             setSelectedUserRoutes([]);
             setCategories([]);
+            setStudentContextMenu({ open: false, x: 0, y: 0, user: null, routeId: "" });
             return;
         }
 
@@ -275,6 +292,26 @@ function AdminApp() {
         setSelectedRouteId("");
         loadSelectedSummary(selectedUserId).catch((err) => api.notify(err.message || "加载学生摘要失败", true));
     }, [selectedUserId]);
+
+    useEffect(() => {
+        if (!studentContextMenu.open) return;
+
+        const closeMenu = () => {
+            setStudentContextMenu((prev) => (prev.open ? { ...prev, open: false } : prev));
+        };
+        const onEsc = (e) => {
+            if (e.key === "Escape") closeMenu();
+        };
+
+        document.addEventListener("click", closeMenu);
+        document.addEventListener("contextmenu", closeMenu);
+        document.addEventListener("keydown", onEsc);
+        return () => {
+            document.removeEventListener("click", closeMenu);
+            document.removeEventListener("contextmenu", closeMenu);
+            document.removeEventListener("keydown", onEsc);
+        };
+    }, [studentContextMenu.open]);
 
     useEffect(() => {
         if (document.getElementById("od-line-label-style")) return;
@@ -466,6 +503,66 @@ function AdminApp() {
         setRouteKeyword("");
     }
 
+    function showAllStudentsRoutes() {
+        setOnlySelectedStudent(false);
+        setSelectedRouteId("");
+    }
+
+    function showSelectedStudentRoutes() {
+        if (!selectedUserId) {
+            api.notify("请先在左侧选择学生", true);
+            return;
+        }
+        setOnlySelectedStudent(true);
+        setSelectedRouteId("");
+    }
+
+    function openStudentContextMenu(e, user) {
+        e.preventDefault();
+        setSelectedUserId(user.id);
+        setStudentContextMenu({
+            open: true,
+            x: e.clientX,
+            y: e.clientY,
+            user,
+            routeId: "",
+        });
+    }
+
+    function applyContextRouteFilter() {
+        const routeId = String(studentContextMenu.routeId || "");
+        const user = studentContextMenu.user;
+        if (!user) return;
+        if (!routeId) {
+            setSelectedUserId(user.id);
+            setOnlySelectedStudent(true);
+            setSelectedRouteId("");
+            zoomToStudent(user.id);
+            return;
+        }
+        const route = allRoutes.find((r) => String(r.id) === routeId);
+        if (!route) {
+            api.notify("该线路不存在或已被删除", true);
+            return;
+        }
+        focusOneRoute(route);
+        setStudentContextMenu((prev) => ({ ...prev, open: false }));
+    }
+
+    function removeContextSelectedRoute() {
+        const routeId = String(studentContextMenu.routeId || "");
+        if (!routeId) {
+            api.notify("请先在右键菜单选择一条线路", true);
+            return;
+        }
+        const route = allRoutes.find((r) => String(r.id) === routeId);
+        if (!route) {
+            api.notify("该线路不存在或已被删除", true);
+            return;
+        }
+        removeRoute(route);
+    }
+
     function generateAllOdMap() {
         if (allRoutes.length === 0) {
             api.notify("当前没有可用线路数据", true);
@@ -600,21 +697,94 @@ function AdminApp() {
         if (!window.confirm(`确认删除账户 ${account.name}（${account.username || account.student_no || "无用户名"}）？该账户所有线路也会删除。`)) {
             return;
         }
+        const deletedIsSelected = Number(selectedUserId) === Number(account.id);
+        const summaryTargetId = deletedIsSelected ? null : selectedUserId;
+        if (deletedIsSelected) {
+            setSelectedUserId(null);
+            setSelectedRouteId("");
+            setSelectedUser(null);
+            setSelectedUserRoutes([]);
+            setCategories([]);
+        }
         setAccountDeleteBusyId(account.id);
         try {
             await api.del(`/api/admin/accounts/${account.id}`);
             api.notify("账户已删除");
+            setStudentContextMenu((prev) => ({ ...prev, open: false, routeId: "" }));
             await Promise.all([
                 loadAccounts(),
                 loadUsers(),
                 loadAllRoutes(),
                 loadOverview(),
-                selectedUserId ? loadSelectedSummary(selectedUserId) : Promise.resolve(),
             ]);
+            if (summaryTargetId) {
+                try {
+                    await loadSelectedSummary(summaryTargetId);
+                } catch {
+                    // Selected user may have been removed during deletion.
+                }
+            }
         } catch (err) {
             api.notify(err.message || "删除账户失败", true);
         } finally {
             setAccountDeleteBusyId(null);
+        }
+    }
+
+    async function removeRoute(route) {
+        if (!route || !route.id) return;
+        if (!window.confirm(`确认删除线路「${routeBrief(route)}」？`)) {
+            return;
+        }
+        setRouteDeleteBusyId(route.id);
+        try {
+            await api.del(`/api/routes/${route.id}`);
+            if (String(selectedRouteId) === String(route.id)) {
+                setSelectedRouteId("");
+            }
+            api.notify("线路已删除");
+            setStudentContextMenu((prev) => ({ ...prev, open: false, routeId: "" }));
+            await Promise.all([
+                loadAllRoutes(),
+                loadUsers(),
+                loadOverview(),
+                selectedUserId ? loadSelectedSummary(selectedUserId) : Promise.resolve(),
+            ]);
+        } catch (err) {
+            api.notify(err.message || "删除线路失败", true);
+        } finally {
+            setRouteDeleteBusyId(null);
+        }
+    }
+
+    async function removeSelectedUserRoutes(userInput = null) {
+        const targetUser = userInput || selectedUser;
+        if (!targetUser) return;
+        const targetRoutes = allRoutes.filter((r) => Number(r.user_id) === Number(targetUser.id));
+        const total = Number(targetRoutes.length || 0);
+        if (total <= 0) {
+            api.notify("该学生暂无可删除线路", true);
+            return;
+        }
+        if (!window.confirm(`确认删除 ${targetUser.name} 的全部 ${total} 条线路？`)) {
+            return;
+        }
+        setDeleteUserRoutesBusy(true);
+        try {
+            const res = await api.del(`/api/admin/accounts/${targetUser.id}/routes`);
+            setSelectedRouteId("");
+            setStudentContextMenu((prev) => ({ ...prev, open: false, routeId: "" }));
+            api.notify(`已删除 ${api.fmtNumber(res.deleted_count || 0)} 条线路`);
+            await Promise.all([
+                loadAllRoutes(),
+                loadUsers(),
+                loadOverview(),
+                selectedUserId ? loadSelectedSummary(selectedUserId) : Promise.resolve(),
+            ]);
+        } catch (err) {
+            api.notify(err.message || "删除学生线路失败", true);
+        } finally {
+            setDeleteUserRoutesBusy(false);
         }
     }
 
@@ -726,7 +896,7 @@ function AdminApp() {
                     </div>
 
                     <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50/50 px-2 py-1.5 text-xs font-semibold text-slate-600">
-                        单击选择学生，双击直接缩放到该学生线路
+                        单击选择学生，双击缩放到该学生线路，右键打开操作菜单（删除路线/账户）
                     </div>
 
                     <input
@@ -754,6 +924,7 @@ function AdminApp() {
                                 key={u.id}
                                 onClick={() => setSelectedUserId(u.id)}
                                 onDoubleClick={() => zoomToStudent(u.id)}
+                                onContextMenu={(e) => openStudentContextMenu(e, u)}
                                 className={`w-full rounded-xl border p-2 text-left ${
                                     Number(selectedUserId) === Number(u.id)
                                         ? "border-admin-300 bg-blue-50"
@@ -814,19 +985,26 @@ function AdminApp() {
                         </div>
 
                         <div className={`ios-collapse ${filterPanelOpen ? "mt-2 max-h-[900px] opacity-100" : "max-h-0 opacity-0"}`}>
-                        <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
-                            <input
-                                type="checkbox"
-                                checked={onlySelectedStudent}
-                                onChange={(e) => {
-                                    setOnlySelectedStudent(e.target.checked);
-                                    setSelectedRouteId("");
-                                }}
-                            />
-                            仅显示当前选中学生
-                        </label>
+                        <div className="text-xs font-semibold text-slate-500">学生范围</div>
+                        <div className="mt-1 grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                onClick={showAllStudentsRoutes}
+                                className={`rounded-md border px-2 py-1 text-xs font-bold ${!onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
+                            >
+                                全部学生
+                            </button>
+                            <button
+                                type="button"
+                                onClick={showSelectedStudentRoutes}
+                                disabled={!selectedUserId}
+                                className={`rounded-md border px-2 py-1 text-xs font-bold disabled:opacity-60 ${onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
+                            >
+                                仅选中学生
+                            </button>
+                        </div>
 
-                        <div className="mt-2 text-xs font-semibold text-slate-500">特定线路筛选（基于选中学生）</div>
+                        <div className="mt-2 text-xs font-semibold text-slate-500">特定线路筛选（选中学生）</div>
                         <select
                             value={selectedRouteId}
                             onChange={(e) => {
@@ -843,6 +1021,20 @@ function AdminApp() {
                                 </option>
                             ))}
                         </select>
+                        <div className="mt-1 flex items-center justify-end">
+                            <button
+                                type="button"
+                                disabled={!selectedRouteId}
+                                onClick={() => {
+                                    const route = selectedUserRoutes.find((r) => String(r.id) === String(selectedRouteId));
+                                    if (!route) return;
+                                    focusOneRoute(route);
+                                }}
+                                className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                            >
+                                展示该线路
+                            </button>
+                        </div>
 
                         <div className="mt-2 text-xs font-semibold text-slate-500">分类筛选</div>
                         <select
@@ -886,10 +1078,39 @@ function AdminApp() {
                         </div>
                     </div>
 
-                    <div className="absolute bottom-4 left-4 z-[900] max-w-[440px] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft">
+                    <div
+                        className="absolute bottom-4 left-4 z-[900] max-w-[440px] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft transition-all duration-500"
+                        style={{ transform: `scale(${detailCardScale})`, transformOrigin: "left bottom" }}
+                    >
                         {!selectedUser && <div className="text-sm font-semibold text-slate-500">请选择学生查看详情。</div>}
                         {selectedUser && (
                             <div>
+                                <div className="mb-2 flex items-center justify-between">
+                                    <div className="text-xs font-bold text-slate-500">详情卡片缩放</div>
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setDetailCardScale((v) => Math.max(0.85, Number((v - 0.05).toFixed(2))))}
+                                            className="rounded-md border border-blue-200 bg-white px-2 py-0.5 text-xs font-black text-admin-600"
+                                        >
+                                            -
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setDetailCardScale(1)}
+                                            className="rounded-md border border-blue-200 bg-white px-2 py-0.5 text-xs font-black text-admin-600"
+                                        >
+                                            {Math.round(detailCardScale * 100)}%
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setDetailCardScale((v) => Math.min(1.4, Number((v + 0.05).toFixed(2))))}
+                                            className="rounded-md border border-blue-200 bg-white px-2 py-0.5 text-xs font-black text-admin-600"
+                                        >
+                                            +
+                                        </button>
+                                    </div>
+                                </div>
                                 <div className="text-lg font-black text-admin-600">{selectedUser.name}</div>
                                 <div className="text-xs font-semibold text-slate-500">
                                     用户名：{selectedUser.username || selectedUser.student_no || "未设置"} | 状态：{selectedUser.status}
@@ -899,6 +1120,7 @@ function AdminApp() {
                                 </div>
                                 <div className="mt-1 text-xs font-semibold text-slate-500">分类：{topCategoryText || "暂无"}</div>
                                 <div className="mt-1 text-xs font-semibold text-slate-500">最后活跃：{api.fmtTime(selectedUser.last_active_at)}</div>
+                                <div className="mt-2 text-xs font-semibold text-slate-500">删除操作请在左侧学生列表右键菜单中执行</div>
                             </div>
                         )}
                     </div>
@@ -962,6 +1184,98 @@ function AdminApp() {
                 )}
             </main>
 
+            {studentContextMenu.open && studentContextMenu.user && (
+                <div
+                    className="fixed z-[1400] w-[min(90vw,320px)] rounded-xl border border-blue-100 bg-white p-3 shadow-soft ios-pop-in"
+                    style={{
+                        left: Math.max(8, Math.min(studentContextMenu.x, window.innerWidth - 330)),
+                        top: Math.max(8, Math.min(studentContextMenu.y, window.innerHeight - 360)),
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    onContextMenu={(e) => e.preventDefault()}
+                >
+                    <div className="text-sm font-black text-admin-600">{studentContextMenu.user.name}</div>
+                    <div className="text-xs font-semibold text-slate-500">
+                        用户名：{studentContextMenu.user.username || studentContextMenu.user.student_no || "未设置"}
+                    </div>
+
+                    <div className="mt-2 flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                showAllStudentsRoutes();
+                                setStudentContextMenu((prev) => ({ ...prev, open: false }));
+                            }}
+                            className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
+                        >
+                            显示全部学生
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                zoomToStudent(studentContextMenu.user.id);
+                                setStudentContextMenu((prev) => ({ ...prev, open: false }));
+                            }}
+                            className="rounded-md border border-admin-200 bg-admin-50 px-2 py-1 text-xs font-bold text-admin-600"
+                        >
+                            仅显示该学生
+                        </button>
+                    </div>
+
+                    <div className="mt-2 text-xs font-semibold text-slate-500">选择该学生的一条线路</div>
+                    <select
+                        value={studentContextMenu.routeId}
+                        onChange={(e) => setStudentContextMenu((prev) => ({ ...prev, routeId: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
+                    >
+                        <option value="">请选择线路</option>
+                        {contextUserRoutes.map((route) => (
+                            <option key={route.id} value={route.id}>
+                                {routeBrief(route)} | {route.category}
+                            </option>
+                        ))}
+                    </select>
+
+                    <div className="mt-2 flex items-center gap-2">
+                        <button
+                            type="button"
+                            disabled={!studentContextMenu.routeId}
+                            onClick={applyContextRouteFilter}
+                            className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                        >
+                            展示该线路
+                        </button>
+                        <button
+                            type="button"
+                            disabled={!studentContextMenu.routeId || !!routeDeleteBusyId}
+                            onClick={removeContextSelectedRoute}
+                            className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 disabled:opacity-60"
+                        >
+                            {routeDeleteBusyId ? "删除中..." : "删除该线路"}
+                        </button>
+                    </div>
+
+                    <div className="mt-2 flex items-center gap-2">
+                        <button
+                            type="button"
+                            disabled={deleteUserRoutesBusy || contextUserRoutes.length === 0}
+                            onClick={() => removeSelectedUserRoutes(studentContextMenu.user)}
+                            className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700 disabled:opacity-60"
+                        >
+                            {deleteUserRoutesBusy ? "删除中..." : "删除该学生全部路线"}
+                        </button>
+                        <button
+                            type="button"
+                            disabled={accountDeleteBusyId === studentContextMenu.user.id}
+                            onClick={() => removeAccount(studentContextMenu.user)}
+                            className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 disabled:opacity-60"
+                        >
+                            {accountDeleteBusyId === studentContextMenu.user.id ? "删除中..." : "删除该学生账户"}
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {loading && (
                 <div className="pointer-events-none fixed inset-0 z-[1200] flex items-center justify-center bg-white/40 backdrop-blur-[1px]">
                     <div className="rounded-xl border border-blue-100 bg-white px-4 py-2 text-sm font-bold text-admin-600 shadow-soft">正在加载...</div>
@@ -971,4 +1285,9 @@ function AdminApp() {
     );
 }
 
-ReactDOM.createRoot(document.getElementById("app")).render(<AdminApp />);
+const adminRootNode = document.getElementById("app");
+if (ReactDOM.createRoot) {
+    ReactDOM.createRoot(adminRootNode).render(<AdminApp />);
+} else {
+    ReactDOM.render(<AdminApp />, adminRootNode);
+}

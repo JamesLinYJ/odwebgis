@@ -124,6 +124,8 @@ manage_accounts.bat list
 - `GET /api/users/{id}/summary` 用户详情与路线
 - `GET /api/stats/overview` 总览统计
 - `GET /api/admin/overview` 管理员全局总览
+- `DELETE /api/admin/accounts/{id}` 管理员删除账户（同时删除该账户全部路线）
+- `DELETE /api/admin/accounts/{id}/routes` 管理员仅删除某账户全部路线
 - `GET /api/admin/region-load` 区域负载
 - `GET /api/admin/hourly` 小时趋势
 - `GET /api/alerts` 告警列表
@@ -153,12 +155,18 @@ manage_accounts.bat list
 tools/tailwindcss.exe -i static/css/tailwind.input.css -o static/css/tailwind.generated.css --minify
 ```
 
-## 10. Linux 一键脚本
-
-完整傻瓜式一键部署（安装依赖、配置 Key、启动服务、创建默认管理员）：
+Linux 下可直接使用：
 
 ```bash
-chmod +x deploy_linux_oneclick.sh setup_linux.sh start_linux.sh cleanup_linux.sh manage_map_key.sh
+./build_tailwind.sh
+```
+
+## 10. Linux 一键脚本
+
+完整傻瓜式一键部署（安装依赖、编译 Tailwind、配置 Key、启动服务、创建默认管理员）：
+
+```bash
+chmod +x deploy_linux_oneclick.sh setup_linux.sh start_linux.sh cleanup_linux.sh uninstall_linux.sh manage_map_key.sh
 ./deploy_linux_oneclick.sh --map-key "你的天地图Key"
 ```
 
@@ -184,4 +192,11 @@ chmod +x deploy_linux_oneclick.sh setup_linux.sh start_linux.sh cleanup_linux.sh
 ```bash
 ./cleanup_linux.sh runtime   # 停进程 + 清日志/缓存
 ./cleanup_linux.sh all       # 额外清理 .venv / webgis.db / .tianditu_key / .env.webgis
+```
+
+卸载：
+
+```bash
+./uninstall_linux.sh
+./uninstall_linux.sh --all --yes
 ```
