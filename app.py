@@ -198,7 +198,6 @@ def build_system_admin_user(status: str = "online") -> dict[str, Any]:
         "force_password_change": 0,
         "must_change_password": False,
         "route_count": 0,
-        "total_flow": 0.0,
         "is_system_admin": True,
     }
 
@@ -312,7 +311,7 @@ def create_app() -> Flask:
             if parsed.netloc and parsed.netloc != request.host:
                 return jsonify({"ok": False, "message": "非法请求来源"}), 403
 
-        if layer not in {"vec", "cva"}:
+        if layer not in {"vec", "cva", "img", "cia"}:
             return jsonify({"ok": False, "message": "不支持的图层"}), 404
         tianditu_api_key = get_tianditu_api_key()
         if not tianditu_api_key:
@@ -384,7 +383,7 @@ def create_app() -> Flask:
         db = get_db()
         user = db.execute(
             """
-            SELECT u.*, COUNT(r.id) AS route_count, COALESCE(SUM(r.flow_weight), 0) AS total_flow
+            SELECT u.*, COUNT(r.id) AS route_count
             FROM users u
             LEFT JOIN od_routes r ON r.user_id = u.id
             WHERE u.id = ?
@@ -775,7 +774,7 @@ def create_app() -> Flask:
     def download_template() -> Any:
         content = (
             "origin_code,origin_name,origin_lat,origin_lon,destination_code,destination_name,"
-            "destination_lat,destination_lon,flow_weight,category,user_id\n"
+            "destination_lat,destination_lon,category,user_id\n"
         ).encode("utf-8-sig")
         return send_file(
             io.BytesIO(content),
@@ -833,8 +832,7 @@ def create_app() -> Flask:
         sql = [
             """
             SELECT u.*,
-                   COUNT(r.id) AS route_count,
-                   COALESCE(SUM(r.flow_weight), 0) AS total_flow
+                   COUNT(r.id) AS route_count
             FROM users u
             LEFT JOIN od_routes r ON r.user_id = u.id
             WHERE 1=1
@@ -860,7 +858,7 @@ def create_app() -> Flask:
             sql.append("AND u.user_type = ?")
             params.append(user_type)
 
-        sql.append("GROUP BY u.id ORDER BY total_flow DESC")
+        sql.append("GROUP BY u.id ORDER BY route_count DESC, datetime(COALESCE(u.last_active_at, u.created_at)) DESC")
         rows = db.execute("\n".join(sql), params).fetchall()
         return jsonify({"ok": True, "users": [user_row_to_dict(r) for r in rows]})
 
@@ -878,8 +876,7 @@ def create_app() -> Flask:
         user = db.execute(
             """
             SELECT u.*,
-                   COUNT(r.id) AS route_count,
-                   COALESCE(SUM(r.flow_weight), 0) AS total_flow
+                   COUNT(r.id) AS route_count
             FROM users u
             LEFT JOIN od_routes r ON r.user_id = u.id
             WHERE u.id = ?
@@ -905,11 +902,11 @@ def create_app() -> Flask:
 
         categories = db.execute(
             """
-            SELECT category, COUNT(*) AS count, COALESCE(SUM(flow_weight), 0) AS flow
+            SELECT category, COUNT(*) AS count
             FROM od_routes
             WHERE user_id = ?
             GROUP BY category
-            ORDER BY flow DESC
+            ORDER BY count DESC
             """,
             (user_id,),
         ).fetchall()
@@ -939,10 +936,6 @@ def create_app() -> Flask:
     @app.get("/api/stats/overview")
     def stats_overview() -> Any:
         db = get_db()
-        total_flow = (
-            db.execute("SELECT COALESCE(SUM(flow_weight), 0) AS v FROM od_routes")
-            .fetchone()["v"]
-        )
         route_count = db.execute("SELECT COUNT(*) AS v FROM od_routes").fetchone()["v"]
         active_alerts = (
             db.execute("SELECT COUNT(*) AS v FROM alerts WHERE active = 1").fetchone()["v"]
@@ -951,7 +944,7 @@ def create_app() -> Flask:
         peak = db.execute(
             """
             SELECT strftime('%H', created_at) AS hour,
-                   COALESCE(SUM(flow_weight), 0) AS total
+                   COUNT(*) AS total
             FROM od_routes
             GROUP BY hour
             ORDER BY total DESC
@@ -967,7 +960,7 @@ def create_app() -> Flask:
         hourly = {int(r["hour"]): int(r["total"]) for r in db.execute(
             """
             SELECT CAST(strftime('%H', created_at) AS INTEGER) AS hour,
-                   COALESCE(SUM(flow_weight), 0) AS total
+                   COUNT(*) AS total
             FROM od_routes
             GROUP BY hour
             """
@@ -977,7 +970,6 @@ def create_app() -> Flask:
         return jsonify(
             {
                 "ok": True,
-                "total_flow": round(float(total_flow), 2),
                 "route_count": int(route_count),
                 "active_alerts": int(active_alerts),
                 "peak_window": peak_window,
@@ -997,7 +989,7 @@ def create_app() -> Flask:
             """
             SELECT
                 COALESCE(n.region, '自定义') AS region,
-                COALESCE(SUM(r.flow_weight), 0) AS total
+                COUNT(r.id) AS total
             FROM od_routes r
             LEFT JOIN nodes n ON UPPER(r.destination_code) = UPPER(n.code)
             GROUP BY COALESCE(n.region, '自定义')
@@ -1028,7 +1020,7 @@ def create_app() -> Flask:
         rows = db.execute(
             """
             SELECT CAST(strftime('%H', created_at) AS INTEGER) AS hour,
-                   COALESCE(SUM(flow_weight), 0) AS total
+                   COUNT(*) AS total
             FROM od_routes
             GROUP BY hour
             ORDER BY hour ASC
@@ -1059,18 +1051,15 @@ def create_app() -> Flask:
             """
         ).fetchone()["v"]
         total_routes = db.execute("SELECT COUNT(*) AS v FROM od_routes").fetchone()["v"]
-        total_flow = db.execute(
-            "SELECT COALESCE(SUM(flow_weight), 0) AS v FROM od_routes"
-        ).fetchone()["v"]
 
         top_student = db.execute(
             """
-            SELECT u.id, u.name, COALESCE(SUM(r.flow_weight), 0) AS flow
+            SELECT u.id, u.name, COUNT(r.id) AS route_count
             FROM users u
             LEFT JOIN od_routes r ON r.user_id = u.id
             WHERE u.user_type = 'student'
             GROUP BY u.id
-            ORDER BY flow DESC
+            ORDER BY route_count DESC
             LIMIT 1
             """
         ).fetchone()
@@ -1082,7 +1071,6 @@ def create_app() -> Flask:
                 "active_students": int(active_students),
                 "new_students_today": int(new_students_today),
                 "total_routes": int(total_routes),
-                "total_flow": round(float(total_flow), 2),
                 "top_student": dict(top_student) if top_student else None,
             }
         )
@@ -1101,8 +1089,7 @@ def create_app() -> Flask:
         sql = [
             """
             SELECT u.*,
-                   COUNT(r.id) AS route_count,
-                   COALESCE(SUM(r.flow_weight), 0) AS total_flow
+                   COUNT(r.id) AS route_count
             FROM users u
             LEFT JOIN od_routes r ON r.user_id = u.id
             WHERE 1=1
@@ -1288,19 +1275,18 @@ def create_app() -> Flask:
             """
             SELECT u.id, u.name, u.status, u.role, u.student_no,
                    COUNT(r.id) AS route_count,
-                   COALESCE(SUM(r.flow_weight), 0) AS total_flow,
                    u.last_active_at
             FROM users u
             LEFT JOIN od_routes r ON r.user_id = u.id
             GROUP BY u.id
-            ORDER BY total_flow DESC
+            ORDER BY route_count DESC
             """
         ).fetchall()
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(
-            ["ID", "姓名", "用户名", "状态", "角色", "路线数量", "总流量", "最后活跃时间"]
+            ["ID", "姓名", "用户名", "状态", "角色", "路线数量", "最后活跃时间"]
         )
         for r in rows:
             writer.writerow(
@@ -1311,7 +1297,6 @@ def create_app() -> Flask:
                     user_status_label(r["status"]),
                     r["role"],
                     r["route_count"],
-                    round(float(r["total_flow"]), 2),
                     r["last_active_at"],
                 ]
             )
@@ -1459,10 +1444,6 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
         to_optional_float(payload.get("destination_lon")),
     )
 
-    flow_weight = to_float(payload.get("flow_weight"), "flow_weight")
-    if flow_weight <= 0:
-        raise ValueError("flow_weight 必须大于 0")
-
     category = (payload.get("category") or "货运").strip() or "货运"
     status = (payload.get("status") or "active").strip() or "active"
     created_at = (payload.get("created_at") or "").strip()
@@ -1486,11 +1467,10 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
             destination_name,
             destination_lat,
             destination_lon,
-            flow_weight,
             category,
             status,
             created_at
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             user_id,
@@ -1502,7 +1482,6 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
             destination["name"],
             destination["lat"],
             destination["lon"],
-            flow_weight,
             category,
             status,
             created_at,
@@ -1523,7 +1502,6 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
 
 def route_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     result = dict(row)
-    result["flow_weight"] = round(float(result.get("flow_weight", 0)), 2)
     result["line_label"] = (
         f"{result.get('origin_code') or result.get('origin_name')} -> "
         f"{result.get('destination_code') or result.get('destination_name')}"
@@ -1542,7 +1520,6 @@ def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     result["status"] = user_status_label(status_code)
     result["username"] = result.get("student_no") or ""
     result["must_change_password"] = bool(int(result.get("force_password_change") or 0))
-    result["total_flow"] = round(float(result.get("total_flow", 0)), 2)
     result["route_count"] = int(result.get("route_count", 0))
     result["is_system_admin"] = False
     return result
@@ -1592,7 +1569,6 @@ def init_db() -> None:
             destination_name TEXT NOT NULL,
             destination_lat REAL NOT NULL,
             destination_lon REAL NOT NULL,
-            flow_weight REAL NOT NULL,
             category TEXT NOT NULL,
             status TEXT NOT NULL,
             created_at TEXT NOT NULL,
@@ -1610,6 +1586,7 @@ def init_db() -> None:
     )
 
     ensure_user_columns(db)
+    ensure_routes_schema(db)
     cleanup_legacy_seed_admin(db)
 
     db.commit()
@@ -1667,6 +1644,49 @@ def ensure_user_columns(db: sqlite3.Connection) -> None:
            OR avatar_url LIKE 'http://i.pravatar.cc/%'
         """,
         (LOCAL_DEFAULT_AVATAR,),
+    )
+
+
+def ensure_routes_schema(db: sqlite3.Connection) -> None:
+    columns = [r["name"] for r in db.execute("PRAGMA table_info(od_routes)").fetchall()]
+    if not columns:
+        return
+    if "flow_weight" not in columns:
+        return
+
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS od_routes_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            origin_code TEXT,
+            origin_name TEXT NOT NULL,
+            origin_lat REAL NOT NULL,
+            origin_lon REAL NOT NULL,
+            destination_code TEXT,
+            destination_name TEXT NOT NULL,
+            destination_lat REAL NOT NULL,
+            destination_lon REAL NOT NULL,
+            category TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
+
+        INSERT INTO od_routes_new(
+            id, user_id, origin_code, origin_name, origin_lat, origin_lon,
+            destination_code, destination_name, destination_lat, destination_lon,
+            category, status, created_at
+        )
+        SELECT
+            id, user_id, origin_code, origin_name, origin_lat, origin_lon,
+            destination_code, destination_name, destination_lat, destination_lon,
+            category, status, created_at
+        FROM od_routes;
+
+        DROP TABLE od_routes;
+        ALTER TABLE od_routes_new RENAME TO od_routes;
+        """
     )
 
 

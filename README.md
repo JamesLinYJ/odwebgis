@@ -80,20 +80,13 @@ Linux 可用：
 python run_local.py
 ```
 
-## 4. 系统后台管理账号（无默认管理员）
+## 4. 系统后台管理账号与默认管理员
 
-系统不再自动创建默认管理员账户。后台登录建议使用部署环境变量配置的系统后台账号：
-
-- `WEBGIS_SYSTEM_ADMIN_ACCOUNT`
-- `WEBGIS_SYSTEM_ADMIN_PASSWORD` 或 `WEBGIS_SYSTEM_ADMIN_PASSWORD_SHA256`
-
-示例（Windows PowerShell）：
-
-```powershell
-$env:WEBGIS_SYSTEM_ADMIN_ACCOUNT="SYS_ROOT"
-$env:WEBGIS_SYSTEM_ADMIN_PASSWORD="Your#Strong#Pass123!"
-python app.py
-```
+- 系统后台账号（可选）仍支持环境变量：
+  - `WEBGIS_SYSTEM_ADMIN_ACCOUNT`
+  - `WEBGIS_SYSTEM_ADMIN_PASSWORD` 或 `WEBGIS_SYSTEM_ADMIN_PASSWORD_SHA256`
+- Linux 一键部署脚本会自动创建一个默认管理员网页账号（可自定义用户名和密码）。
+- 如未手动指定默认管理员密码，部署脚本会自动生成并在终端输出一次。
 
 ## 5. 命令行账户管理（系统后台无需网页登录）
 
@@ -138,13 +131,12 @@ manage_accounts.bat list
 
 ## 7. CSV 模板字段
 
-`origin_code,origin_name,origin_lat,origin_lon,destination_code,destination_name,destination_lat,destination_lon,flow_weight,category,user_id`
+`origin_code,origin_name,origin_lat,origin_lon,destination_code,destination_name,destination_lat,destination_lon,category,user_id`
 
 说明：
 
 - 起点和终点均支持“代码或坐标”任意一种方式。
 - 当填写代码时，会从 `nodes` 节点表自动解析坐标。
-- `flow_weight` 必须大于 0。
 
 ## 8. 数据存储
 
@@ -163,11 +155,22 @@ tools/tailwindcss.exe -i static/css/tailwind.input.css -o static/css/tailwind.ge
 
 ## 10. Linux 一键脚本
 
-首次一键安装依赖并启动：
+完整傻瓜式一键部署（安装依赖、配置 Key、启动服务、创建默认管理员）：
 
 ```bash
-chmod +x setup_linux.sh start_linux.sh cleanup_linux.sh manage_map_key.sh
-./setup_linux.sh
+chmod +x deploy_linux_oneclick.sh setup_linux.sh start_linux.sh cleanup_linux.sh manage_map_key.sh
+./deploy_linux_oneclick.sh --map-key "你的天地图Key"
+```
+
+可选参数：
+
+```bash
+./deploy_linux_oneclick.sh \
+  --map-key "你的天地图Key" \
+  --host 0.0.0.0 \
+  --port 5000 \
+  --admin-username admin \
+  --admin-password "Your#Admin#Pass123!"
 ```
 
 仅启动（已安装依赖后）：
@@ -180,5 +183,5 @@ chmod +x setup_linux.sh start_linux.sh cleanup_linux.sh manage_map_key.sh
 
 ```bash
 ./cleanup_linux.sh runtime   # 停进程 + 清日志/缓存
-./cleanup_linux.sh all       # 额外清理 .venv / webgis.db / .tianditu_key
+./cleanup_linux.sh all       # 额外清理 .venv / webgis.db / .tianditu_key / .env.webgis
 ```

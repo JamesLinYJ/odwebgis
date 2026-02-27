@@ -1,4 +1,5 @@
 .tianditu_key
+.env.webgis
 .venv/
 __pycache__/
 logs/

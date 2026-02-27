@@ -6,12 +6,13 @@ cd "$ROOT_DIR"
 
 PID_FILE="${PID_FILE:-webgis.pid}"
 LOG_DIR="${LOG_DIR:-logs}"
+ENV_FILE="${ENV_FILE:-.env.webgis}"
 
 stop_service() {
   if [[ -f "$PID_FILE" ]]; then
     PID="$(cat "$PID_FILE" 2>/dev/null || true)"
     if [[ -n "${PID:-}" ]] && kill -0 "$PID" 2>/dev/null; then
-      echo "[INFO] 停止 WebGIS 进程 PID=$PID"
+      echo "[INFO] Stopping WebGIS process PID=$PID"
       kill "$PID" 2>/dev/null || true
       sleep 1
       if kill -0 "$PID" 2>/dev/null; then
@@ -35,6 +36,7 @@ clean_all() {
   rm -rf .venv
   rm -f webgis.db
   rm -f .tianditu_key
+  rm -f "$ENV_FILE"
 }
 
 MODE="${1:-runtime}"
@@ -44,15 +46,15 @@ stop_service
 case "$MODE" in
   runtime)
     clean_runtime
-    echo "[OK] 已完成运行时清理（进程/日志/缓存）。"
+    echo "[OK] Runtime cleanup complete (process/log/cache)."
     ;;
   all)
     clean_all
-    echo "[OK] 已完成完整清理（包含 .venv / webgis.db / .tianditu_key）。"
+    echo "[OK] Full cleanup complete (.venv/webgis.db/.tianditu_key/.env.webgis removed)."
     ;;
   *)
-    echo "[ERROR] 不支持的参数: $MODE"
-    echo "用法: ./cleanup_linux.sh [runtime|all]"
+    echo "[ERROR] Unsupported mode: $MODE"
+    echo "Usage: ./cleanup_linux.sh [runtime|all]"
     exit 1
     ;;
 esac

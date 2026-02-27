@@ -1,9 +1,17 @@
 :root {
     --ios-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --ios-ease-soft: cubic-bezier(0.25, 0.8, 0.3, 1);
+    --ios-fast: 0.22s;
+    --ios-normal: 0.36s;
+    --ios-slow: 0.56s;
 }
 
 * {
     -webkit-tap-highlight-color: transparent;
+}
+
+html {
+    scroll-behavior: smooth;
 }
 
 body {
@@ -11,7 +19,8 @@ body {
     isolation: isolate;
     overscroll-behavior-y: none;
     background-size: 180% 180%;
-    animation: pageGradientShift 18s var(--ios-ease) infinite;
+    animation: pageGradientShift 18s var(--ios-ease-soft) infinite;
+    will-change: background-position;
 }
 
 body::before,
@@ -23,6 +32,7 @@ body::after {
     pointer-events: none;
     z-index: -1;
     opacity: 0.3;
+    will-change: transform, opacity;
 }
 
 body::before {
@@ -46,10 +56,11 @@ body::after {
 .ios-card {
     backdrop-filter: blur(12px);
     transition:
-        transform 0.45s var(--ios-ease),
-        box-shadow 0.45s var(--ios-ease),
-        opacity 0.35s var(--ios-ease),
-        border-color 0.35s var(--ios-ease);
+        transform var(--ios-slow) var(--ios-ease),
+        box-shadow var(--ios-slow) var(--ios-ease),
+        opacity var(--ios-normal) var(--ios-ease),
+        border-color var(--ios-normal) var(--ios-ease);
+    will-change: transform, box-shadow, opacity;
 }
 
 .ios-card:hover {
@@ -57,15 +68,47 @@ body::after {
     box-shadow: 0 14px 34px rgba(31, 103, 245, 0.16);
 }
 
+@media (hover: hover) and (pointer: fine) {
+    .ios-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 18px 40px rgba(31, 103, 245, 0.2);
+    }
+}
+
 button,
 input,
 select,
-textarea {
-    transition: all 0.28s var(--ios-ease);
+textarea,
+a {
+    transition:
+        transform var(--ios-fast) var(--ios-ease),
+        box-shadow var(--ios-normal) var(--ios-ease),
+        border-color var(--ios-normal) var(--ios-ease),
+        background-color var(--ios-normal) var(--ios-ease),
+        color var(--ios-normal) var(--ios-ease),
+        opacity var(--ios-normal) var(--ios-ease);
+    will-change: transform, box-shadow;
+}
+
+button:hover:not(:disabled) {
+    transform: translateY(-1px);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22);
 }
 
 button:active {
     transform: scale(0.97);
+}
+
+button:disabled {
+    cursor: not-allowed;
 }
 
 .safe-pb {
@@ -73,7 +116,63 @@ button:active {
 }
 
 .ios-fade-up {
-    animation: iosFadeUp 0.55s var(--ios-ease);
+    animation: iosFadeUp var(--ios-slow) var(--ios-ease);
+}
+
+.ios-fade-in {
+    animation: iosFadeIn var(--ios-normal) var(--ios-ease);
+}
+
+.ios-pop-in {
+    animation: iosPopIn 0.42s var(--ios-ease);
+}
+
+.ios-collapse {
+    overflow: hidden;
+    transform-origin: top;
+    transition:
+        max-height var(--ios-slow) var(--ios-ease),
+        opacity var(--ios-normal) var(--ios-ease),
+        margin var(--ios-normal) var(--ios-ease);
+    will-change: max-height, opacity, margin;
+}
+
+.ios-mode-panel {
+    transition:
+        transform var(--ios-normal) var(--ios-ease),
+        opacity var(--ios-normal) var(--ios-ease),
+        filter var(--ios-normal) var(--ios-ease);
+    transform-origin: top center;
+}
+
+.ios-mode-panel-show {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+}
+
+.ios-mode-panel-hide {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.99);
+    filter: blur(1px);
+}
+
+.leaflet-container {
+    transition: filter var(--ios-normal) var(--ios-ease), transform var(--ios-normal) var(--ios-ease);
+}
+
+.leaflet-bar a,
+.leaflet-control-zoom a {
+    transition: background-color var(--ios-normal) var(--ios-ease), color var(--ios-normal) var(--ios-ease), transform var(--ios-fast) var(--ios-ease);
+}
+
+.leaflet-bar a:hover,
+.leaflet-control-zoom a:hover {
+    transform: translateY(-1px);
+}
+
+.leaflet-tooltip.od-line-label {
+    transition: transform var(--ios-fast) var(--ios-ease), opacity var(--ios-normal) var(--ios-ease);
 }
 
 @keyframes pageGradientShift {
@@ -102,5 +201,32 @@ button:active {
     to {
         opacity: 1;
         transform: translateY(0);
+    }
+}
+
+@keyframes iosFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes iosPopIn {
+    from {
+        opacity: 0;
+        transform: scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
     }
 }

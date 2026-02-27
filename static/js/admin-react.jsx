@@ -40,6 +40,7 @@ function AdminApp() {
     const mapHostRef = useRef(null);
     const mapSectionRef = useRef(null);
     const mapRef = useRef(null);
+    const baseTileLayersRef = useRef(null);
     const routeLayerRef = useRef(null);
 
     const [loading, setLoading] = useState(false);
@@ -50,7 +51,6 @@ function AdminApp() {
         active_students: 0,
         new_students_today: 0,
         total_routes: 0,
-        total_flow: 0,
         top_student: null,
     });
 
@@ -65,6 +65,7 @@ function AdminApp() {
     const [routeCategory, setRouteCategory] = useState("all");
     const [routeKeyword, setRouteKeyword] = useState("");
     const [lineLabelMode, setLineLabelMode] = useState("simple");
+    const [baseMapMode, setBaseMapMode] = useState("vector");
     const [mapFullscreen, setMapFullscreen] = useState(false);
     const [exportingPoster, setExportingPoster] = useState(false);
     const [filterPanelOpen, setFilterPanelOpen] = useState(true);
@@ -307,8 +308,13 @@ function AdminApp() {
         }).setView([35.2, 104.2], 5);
         const chinaBounds = [[18.0, 73.0], [54.5, 135.5]];
         map.setMaxBounds(chinaBounds);
-        L.tileLayer("/api/map/tile/vec/{z}/{x}/{y}", { maxZoom: 18 }).addTo(map);
-        L.tileLayer("/api/map/tile/cva/{z}/{x}/{y}", { maxZoom: 18 }).addTo(map);
+        const vec = L.tileLayer("/api/map/tile/vec/{z}/{x}/{y}", { maxZoom: 18 });
+        const cva = L.tileLayer("/api/map/tile/cva/{z}/{x}/{y}", { maxZoom: 18 });
+        const img = L.tileLayer("/api/map/tile/img/{z}/{x}/{y}", { maxZoom: 18 });
+        const cia = L.tileLayer("/api/map/tile/cia/{z}/{x}/{y}", { maxZoom: 18 });
+        vec.addTo(map);
+        cva.addTo(map);
+        baseTileLayersRef.current = { vec, cva, img, cia };
         map.fitBounds(chinaBounds, { padding: [18, 18] });
 
         mapRef.current = map;
@@ -317,8 +323,26 @@ function AdminApp() {
         return () => {
             map.remove();
             mapRef.current = null;
+            baseTileLayersRef.current = null;
         };
     }, []);
+
+    useEffect(() => {
+        const map = mapRef.current;
+        const layers = baseTileLayersRef.current;
+        if (!map || !layers) return;
+        const { vec, cva, img, cia } = layers;
+        [vec, cva, img, cia].forEach((layer) => {
+            if (map.hasLayer(layer)) map.removeLayer(layer);
+        });
+        if (baseMapMode === "satellite") {
+            img.addTo(map);
+            cia.addTo(map);
+        } else {
+            vec.addTo(map);
+            cva.addTo(map);
+        }
+    }, [baseMapMode]);
 
     useEffect(() => {
         if (!mapRef.current) return;
@@ -368,7 +392,7 @@ function AdminApp() {
 
             if (effectiveLabelMode !== "none") {
                 const labelText = effectiveLabelMode === "detail"
-                    ? `${studentName} | ${route.category} | ${api.fmtNumber(route.flow_weight)}`
+                    ? `${studentName} | ${route.category}`
                     : `${studentName}`;
                 line.bindTooltip(labelText, {
                     permanent: true,
@@ -382,7 +406,6 @@ function AdminApp() {
                     `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
                     `录入用户：${studentName}${studentNo ? ` (${studentNo})` : ""}<br/>` +
                     `分类：${route.category}<br/>` +
-                    `流量：${api.fmtNumber(route.flow_weight)}<br/>` +
                     `时间：${api.fmtTime(route.created_at)}` +
                 `</div>`
             );
@@ -502,6 +525,9 @@ function AdminApp() {
                 width: 1920,
                 height: 1080,
                 scale: 2,
+                map: format === "png" ? mapRef.current : null,
+                baseMapMode,
+                mapScale: 1.5,
             });
             api.notify(format === "svg" ? "OD 图 SVG 已导出" : "OD 图 PNG 已导出");
         } catch (err) {
@@ -660,7 +686,7 @@ function AdminApp() {
 
     const topCategoryText = categories
         .slice(0, 3)
-        .map((item) => `${item.category}:${api.fmtNumber(item.flow)}`)
+        .map((item) => `${item.category}:${api.fmtNumber(item.count)}条`)
         .join(" | ");
 
     return (
@@ -765,6 +791,9 @@ function AdminApp() {
                     <div className="absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
                         <button onClick={() => mapRef.current && mapRef.current.zoomIn()} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xl font-black text-admin-600">+</button>
                         <button onClick={() => mapRef.current && mapRef.current.zoomOut()} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xl font-black text-admin-600">-</button>
+                        <button onClick={() => setBaseMapMode((v) => (v === "vector" ? "satellite" : "vector"))} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-black text-admin-600 sm:text-sm">
+                            {baseMapMode === "satellite" ? "切到矢量" : "切到卫星"}
+                        </button>
                         <button onClick={fitToVisibleRoutes} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-sm font-black text-admin-600">适配</button>
                         <button onClick={toggleMapFullscreen} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-black text-admin-600 sm:text-sm">
                             {mapFullscreen ? "退出全屏" : "全屏"}
@@ -782,7 +811,7 @@ function AdminApp() {
                             </button>
                         </div>
 
-                        <div className={`overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${filterPanelOpen ? "mt-2 max-h-[900px] opacity-100" : "max-h-0 opacity-0"}`}>
+                        <div className={`ios-collapse ${filterPanelOpen ? "mt-2 max-h-[900px] opacity-100" : "max-h-0 opacity-0"}`}>
                         <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
                             <input
                                 type="checkbox"
@@ -808,7 +837,7 @@ function AdminApp() {
                             <option value="">全部线路</option>
                             {selectedUserRoutes.map((route) => (
                                 <option key={route.id} value={route.id}>
-                                    {routeBrief(route)} | {route.category} | {api.fmtNumber(route.flow_weight)}
+                                    {routeBrief(route)} | {route.category}
                                 </option>
                             ))}
                         </select>
@@ -842,7 +871,7 @@ function AdminApp() {
                         >
                             <option value="none">不显示标注</option>
                             <option value="simple">仅姓名标注</option>
-                            <option value="detail">姓名 + 分类 + 流量</option>
+                            <option value="detail">姓名 + 分类</option>
                         </select>
 
                         <div className="mt-2 flex items-center justify-between">
@@ -851,6 +880,7 @@ function AdminApp() {
                                 清空筛选
                             </button>
                         </div>
+                        <div className="mt-1 text-xs font-semibold text-slate-500">底图：{baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}</div>
                         </div>
                     </div>
 
@@ -863,7 +893,7 @@ function AdminApp() {
                                     用户名：{selectedUser.username || selectedUser.student_no || "未设置"} | 状态：{selectedUser.status}
                                 </div>
                                 <div className="mt-2 text-xs font-semibold text-slate-600">
-                                    路线：{api.fmtNumber(selectedUser.route_count)} 条 | 总流量：{api.fmtNumber(selectedUser.total_flow)}
+                                    路线：{api.fmtNumber(selectedUser.route_count)} 条
                                 </div>
                                 <div className="mt-1 text-xs font-semibold text-slate-500">分类：{topCategoryText || "暂无"}</div>
                                 <div className="mt-1 text-xs font-semibold text-slate-500">最后活跃：{api.fmtTime(selectedUser.last_active_at)}</div>
@@ -879,9 +909,8 @@ function AdminApp() {
                         <MetricCard title="在线学生" value={api.fmtNumber(overview.active_students || 0)} />
                         <MetricCard title="今日新增" value={api.fmtNumber(overview.new_students_today || 0)} />
                         <MetricCard title="路线总数" value={api.fmtNumber(overview.total_routes || 0)} />
-                        <MetricCard title="总流量" value={api.fmtNumber(overview.total_flow || 0)} />
                         <MetricCard
-                            title="最高流量学生"
+                            title="路线最多学生"
                             value={overview.top_student ? overview.top_student.name : "暂无"}
                             hint={overview.top_student ? `ID: ${overview.top_student.id}` : ""}
                         />
@@ -904,7 +933,7 @@ function AdminApp() {
                             {selectedUserRoutes.slice(0, 16).map((route) => (
                                 <div key={route.id} className="rounded-lg border border-blue-100 bg-blue-50/40 p-2">
                                     <div className="truncate text-sm font-bold text-slate-700">{routeBrief(route)}</div>
-                                    <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtNumber(route.flow_weight)} | {api.fmtTime(route.created_at)}</div>
+                                    <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
                                     <div className="mt-1 flex items-center justify-end gap-2">
                                         <button
                                             onClick={() => zoomToRoutes([route])}

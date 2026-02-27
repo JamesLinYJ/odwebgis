@@ -155,7 +155,7 @@ function SectionCard({ title, open, onToggle, children, rightNode }) {
           <span className="text-xs font-bold text-slate-500">{open ? "收起" : "展开"}</span>
         </div>
       </button>
-      <div className={`overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] ${open ? "mt-3 max-h-[1800px] opacity-100" : "max-h-0 opacity-0"}`}>
+      <div className={`ios-collapse ${open ? "mt-3 max-h-[1800px] opacity-100" : "max-h-0 opacity-0"}`}>
         {children}
       </div>
     </div>
@@ -182,15 +182,15 @@ function EndpointEditor({ title, endpoint, setEndpoint, coordMode }) {
       <div className="mb-2 text-xs font-bold text-slate-600">{title}</div>
       <input value={endpoint.name} onChange={(e) => setEndpoint((p) => ({ ...p, name: e.target.value }))} className="mb-2 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-sm" placeholder={`${title}名称（可选）`} />
 
-      {coordMode === "decimal" && (
-        <div className="grid grid-cols-2 gap-2">
+      <div className={`ios-collapse ${coordMode === "decimal" ? "max-h-[84px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}>
+        <div className={`grid grid-cols-2 gap-2 ios-mode-panel ${coordMode === "decimal" ? "ios-mode-panel-show" : "ios-mode-panel-hide"}`}>
           <input value={endpoint.decimal.lat} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lat: e.target.value } }))} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm" placeholder="纬度" />
           <input value={endpoint.decimal.lon} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lon: e.target.value } }))} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm" placeholder="经度" />
         </div>
-      )}
+      </div>
 
-      {coordMode === "dms" && (
-        <div className="space-y-2">
+      <div className={`ios-collapse ${coordMode === "dms" ? "mt-2 max-h-[180px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}>
+        <div className={`space-y-2 ios-mode-panel ${coordMode === "dms" ? "ios-mode-panel-show" : "ios-mode-panel-hide"}`}>
           <div>
             <div className="mb-1 text-[11px] font-semibold text-slate-500">纬度（度/分/秒）</div>
             <DmsAxisInput axis="lat" value={endpoint.dms.lat} onChange={(next) => setEndpoint((p) => ({ ...p, dms: { ...p.dms, lat: next } }))} />
@@ -200,7 +200,7 @@ function EndpointEditor({ title, endpoint, setEndpoint, coordMode }) {
             <DmsAxisInput axis="lon" value={endpoint.dms.lon} onChange={(next) => setEndpoint((p) => ({ ...p, dms: { ...p.dms, lon: next } }))} />
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -209,6 +209,7 @@ function ExplorerApp() {
   const mapHostRef = useRef(null);
   const mapSectionRef = useRef(null);
   const mapRef = useRef(null);
+  const baseTileLayersRef = useRef(null);
   const routeLayerRef = useRef(null);
   const draftLayerRef = useRef(null);
 
@@ -224,7 +225,6 @@ function ExplorerApp() {
   const [coordMode, setCoordMode] = useState("decimal");
   const [originInput, setOriginInput] = useState(createEndpointState());
   const [destinationInput, setDestinationInput] = useState(createEndpointState());
-  const [flowWeight, setFlowWeight] = useState("");
   const [routeCategory, setRouteCategory] = useState("课堂");
 
   const [pickTarget, setPickTarget] = useState(null);
@@ -236,6 +236,7 @@ function ExplorerApp() {
   const [recentOpen, setRecentOpen] = useState(true);
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const [exportingPoster, setExportingPoster] = useState(false);
+  const [baseMapMode, setBaseMapMode] = useState("vector");
 
   const categoryColors = useMemo(() => ({ 课堂: "#2563eb", 通勤: "#0891b2", 调研: "#7c3aed", 实习: "#f97316", 其他: "#4b5563" }), []);
 
@@ -259,9 +260,9 @@ function ExplorerApp() {
   }, [allRoutes, showOnlyMine, me, routeCategoryFilter, searchKeyword]);
 
   const mySummary = useMemo(() => {
-    if (!me?.id) return { count: 0, flow: 0 };
+    if (!me?.id) return { count: 0 };
     const mine = allRoutes.filter((r) => Number(r.user_id) === Number(me.id));
-    return { count: mine.length, flow: mine.reduce((sum, r) => sum + Number(r.flow_weight || 0), 0) };
+    return { count: mine.length };
   }, [allRoutes, me]);
   function syncEndpointFromDecimal(kind, lat, lon, fallbackName) {
     const lat6 = Number(lat.toFixed(6));
@@ -370,14 +371,35 @@ function ExplorerApp() {
     const map = L.map(mapHostRef.current, { zoomControl: false, minZoom: 4, attributionControl: false }).setView([35.2, 104.2], 5);
     const chinaBounds = [[18.0, 73.0], [54.5, 135.5]];
     map.setMaxBounds(chinaBounds);
-    L.tileLayer("/api/map/tile/vec/{z}/{x}/{y}", { maxZoom: 18 }).addTo(map);
-    L.tileLayer("/api/map/tile/cva/{z}/{x}/{y}", { maxZoom: 18 }).addTo(map);
+    const vec = L.tileLayer("/api/map/tile/vec/{z}/{x}/{y}", { maxZoom: 18 });
+    const cva = L.tileLayer("/api/map/tile/cva/{z}/{x}/{y}", { maxZoom: 18 });
+    const img = L.tileLayer("/api/map/tile/img/{z}/{x}/{y}", { maxZoom: 18 });
+    const cia = L.tileLayer("/api/map/tile/cia/{z}/{x}/{y}", { maxZoom: 18 });
+    vec.addTo(map);
+    cva.addTo(map);
+    baseTileLayersRef.current = { vec, cva, img, cia };
     map.fitBounds(chinaBounds, { padding: [18, 18] });
     mapRef.current = map;
     routeLayerRef.current = L.layerGroup().addTo(map);
     draftLayerRef.current = L.layerGroup().addTo(map);
     return () => { map.remove(); mapRef.current = null; };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const layers = baseTileLayersRef.current;
+    if (!map || !layers) return;
+    [layers.vec, layers.cva, layers.img, layers.cia].forEach((layer) => {
+      if (layer && map.hasLayer(layer)) map.removeLayer(layer);
+    });
+    if (baseMapMode === "satellite") {
+      layers.img.addTo(map);
+      layers.cia.addTo(map);
+    } else {
+      layers.vec.addTo(map);
+      layers.cva.addTo(map);
+    }
+  }, [baseMapMode]);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -458,7 +480,6 @@ function ExplorerApp() {
         `<div style="min-width:190px">` +
           `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
           `分类：${route.category}<br/>` +
-          `流量：${api.fmtNumber(route.flow_weight)}<br/>` +
           `录入学生：${route.user_name || "-"}<br/>` +
           `时间：${api.fmtTime(route.created_at)}` +
         `</div>`
@@ -542,7 +563,6 @@ function ExplorerApp() {
           destination_name: destinationInput.name || "终点 D",
           destination_lat: destinationPoint[0],
           destination_lon: destinationPoint[1],
-          flow_weight: Number(flowWeight) > 0 ? Number(flowWeight) : 1,
           category: routeCategory || "课堂",
           user_name: me?.name || me?.username || "",
           created_at: new Date().toISOString(),
@@ -575,6 +595,9 @@ function ExplorerApp() {
         width: 1920,
         height: 1080,
         scale: 2,
+        map: format === "png" ? mapRef.current : null,
+        baseMapMode,
+        mapScale: 1.5,
       });
       api.notify(format === "svg" ? "OD 图 SVG 已导出" : "OD 图 PNG 已导出");
     } catch (err) {
@@ -634,8 +657,6 @@ function ExplorerApp() {
     try {
       const origin = parseEndpoint(originInput, "起点");
       const destination = parseEndpoint(destinationInput, "终点");
-      const flow = Number(flowWeight);
-      if (!Number.isFinite(flow) || flow <= 0) throw new Error("流量必须大于 0");
 
       await api.postJson("/api/routes", {
         user_id: me.id,
@@ -645,7 +666,6 @@ function ExplorerApp() {
         destination_name: destination.name,
         destination_lat: destination.lat,
         destination_lon: destination.lon,
-        flow_weight: flow,
         category: routeCategory,
       });
 
@@ -705,6 +725,7 @@ function ExplorerApp() {
           <div className="absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
             <button onClick={() => mapRef.current && mapRef.current.zoomIn()} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xl font-black text-brand-700">+</button>
             <button onClick={() => mapRef.current && mapRef.current.zoomOut()} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xl font-black text-brand-700">-</button>
+            <button onClick={() => setBaseMapMode((v) => (v === "vector" ? "satellite" : "vector"))} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xs font-black text-brand-700 sm:text-sm">{baseMapMode === "satellite" ? "切到矢量" : "切到卫星"}</button>
             <button onClick={fitCurrentRoutes} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xs font-black text-brand-700 sm:text-sm">适配</button>
             <button onClick={toggleMapFullscreen} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xs font-black text-brand-700 sm:text-sm">{mapFullscreen ? "退出全屏" : "全屏"}</button>
           </div>
@@ -719,6 +740,7 @@ function ExplorerApp() {
             <div className="mt-1 text-xs font-semibold text-slate-500">可拖拽 O/D 标记进行微调，操作更直观。</div>
             <div className="mt-2 text-xs font-semibold text-slate-500">O: {originPoint ? formatCoord(originPoint[0], originPoint[1]) : "未设置"}</div>
             <div className="text-xs font-semibold text-slate-500">D: {destinationPoint ? formatCoord(destinationPoint[0], destinationPoint[1]) : "未设置"}</div>
+            <div className="text-xs font-semibold text-slate-500">底图：{baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}</div>
           </div>
         </section>
 
@@ -769,7 +791,6 @@ function ExplorerApp() {
                 <EndpointEditor title="终点 D" endpoint={destinationInput} setEndpoint={setDestinationInput} coordMode={coordMode} />
 
                 <div className="grid grid-cols-2 gap-2 rounded-xl border border-blue-100 bg-white p-2">
-                  <input required type="number" min="0.01" step="0.01" value={flowWeight} onChange={(e) => setFlowWeight(e.target.value)} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm" placeholder="流量" />
                   <select value={routeCategory} onChange={(e) => setRouteCategory(e.target.value)} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm">
                     {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                   </select>
@@ -790,7 +811,7 @@ function ExplorerApp() {
                 {visibleRoutes.slice(0, 12).map((route) => (
                   <div key={route.id} className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
                     <div className="truncate text-sm font-bold text-slate-700">{route.origin_name} -&gt; {route.destination_name}</div>
-                    <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtNumber(route.flow_weight)} | {api.fmtTime(route.created_at)}</div>
+                    <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
                     <div className="mt-1 flex items-center justify-end gap-2">
                       <button type="button" onClick={() => {
                         if (!mapRef.current) return;
@@ -811,9 +832,8 @@ function ExplorerApp() {
       </main>
 
       {!mapFullscreen && (
-        <footer className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <footer className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <StatCard title="我的线路数" value={api.fmtNumber(mySummary.count)} hint="当前账号累计" />
-          <StatCard title="我的总流量" value={api.fmtNumber(mySummary.flow)} hint="当前账号累计" />
           <StatCard title="当前显示线路" value={api.fmtNumber(visibleRoutes.length)} hint={showOnlyMine ? "仅我的数据" : "全体数据"} />
           <StatCard title="点选状态" value={pickTarget ? `等待设置${pickTarget === "origin" ? "起点" : "终点"}` : "未开启"} hint={coordMode === "dms" ? "当前为度分秒输入" : "当前为十进制度输入"} />
         </footer>
