@@ -89,17 +89,14 @@ def validate_password_strength(password: str, username: str = "") -> str | None:
             return "密码加密格式无效"
         return None
 
-    if len(text) < PASSWORD_MIN_LENGTH:
-        return f"密码至少 {PASSWORD_MIN_LENGTH} 位"
-    if len(text) > PASSWORD_MAX_LENGTH:
-        return f"密码长度不能超过 {PASSWORD_MAX_LENGTH} 位"
-    if any(ch.isspace() for ch in text):
-        return "密码不能包含空格"
-    if not all(33 <= ord(ch) <= 126 for ch in text):
-        return "密码仅支持英文、数字和常见符号，不支持中文或全角字符"
-    if username and text.lower() == username.lower():
-        return "密码不能与用户名相同"
-    return None
+    return "密码加密格式无效"
+
+def is_valid_sha256_secret(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value.startswith("sha256:"):
+        return False
+    digest = value[7:].strip().lower()
+    return len(digest) == 64 and all(ch in "0123456789abcdef" for ch in digest)
 
 
 def normalize_password_secret(password: str) -> str:
@@ -482,6 +479,8 @@ def create_app() -> Flask:
 
         if not account or not password:
             return jsonify({"ok": False, "message": "请输入用户名和密码"}), 400
+        if not is_valid_sha256_secret(password):
+            return jsonify({"ok": False, "message": "密码加密格式无效，请刷新页面后重试"}), 400
 
         # 系统后台管理账号（由部署环境变量控制，不写入数据库）
         system_admin_account = get_system_admin_account()
@@ -598,6 +597,8 @@ def create_app() -> Flask:
 
         if not old_password or not new_password:
             return jsonify({"ok": False, "message": "请输入旧密码和新密码"}), 400
+        if not is_valid_sha256_secret(old_password):
+            return jsonify({"ok": False, "message": "密码加密格式无效，请刷新页面后重试"}), 400
         password_err = validate_password_strength(new_password, user["student_no"] or "")
         if password_err:
             return jsonify({"ok": False, "message": password_err}), 400
