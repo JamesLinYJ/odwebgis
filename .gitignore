@@ -1,0 +1,9 @@
+.tianditu_key
+.venv/
+__pycache__/
+logs/
+webgis.pid
+run_stdout.log
+run_stderr.log
+*.pyc
+webgis.db

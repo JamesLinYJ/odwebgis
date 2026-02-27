@@ -1,0 +1,26 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>账户中心</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/misans.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.generated.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/motion.css') }}">
+    <style>
+        body {
+            font-family: "MiSans", "Microsoft YaHei", "PingFang SC", sans-serif;
+            background: radial-gradient(circle at 14% 12%, #f8fcff 0%, #edf5ff 50%, #e4efff 100%);
+        }
+    </style>
+</head>
+<body class="min-h-screen text-slate-800 safe-pb">
+<div id="app"></div>
+
+<script src="{{ url_for('static', filename='vendor/react/react.production.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/react/react-dom.production.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/babel/babel.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script type="text/babel" src="{{ url_for('static', filename='js/account-react.jsx') }}"></script>
+</body>
+</html>
