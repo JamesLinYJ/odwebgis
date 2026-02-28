@@ -5,7 +5,7 @@ import json
 import os
 import sqlite3
 import sys
-from datetime import UTC, datetime
+from datetime import datetime
 
 from werkzeug.security import generate_password_hash
 
@@ -20,7 +20,7 @@ SCHEMA_VERSION = "20260228_v2"
 
 
 def utc_now_text():
-    return datetime.now(UTC).strftime(DATETIME_FMT)
+    return datetime.utcnow().strftime(DATETIME_FMT)
 
 
 def normalize_user_status(status, default="offline"):
