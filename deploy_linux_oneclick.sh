@@ -13,6 +13,9 @@ ADMIN_NAME="${WEBGIS_DEFAULT_ADMIN_NAME:-DefaultAdmin}"
 SYSTEM_ADMIN_ACCOUNT="${WEBGIS_SYSTEM_ADMIN_ACCOUNT:-}"
 SYSTEM_ADMIN_PASSWORD="${WEBGIS_SYSTEM_ADMIN_PASSWORD:-}"
 FORCE_CHANGE=0
+MAP_KEY_ARG_PROVIDED=0
+ADMIN_USERNAME_ARG_PROVIDED=0
+ADMIN_PASSWORD_ARG_PROVIDED=0
 
 usage() {
   cat <<'USAGE'
@@ -44,9 +47,9 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --host) HOST="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
-    --map-key) MAP_KEY="$2"; shift 2 ;;
-    --admin-username) ADMIN_USERNAME="$2"; shift 2 ;;
-    --admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
+    --map-key) MAP_KEY="$2"; MAP_KEY_ARG_PROVIDED=1; shift 2 ;;
+    --admin-username) ADMIN_USERNAME="$2"; ADMIN_USERNAME_ARG_PROVIDED=1; shift 2 ;;
+    --admin-password) ADMIN_PASSWORD="$2"; ADMIN_PASSWORD_ARG_PROVIDED=1; shift 2 ;;
     --admin-name) ADMIN_NAME="$2"; shift 2 ;;
     --system-admin-account) SYSTEM_ADMIN_ACCOUNT="$2"; shift 2 ;;
     --system-admin-password) SYSTEM_ADMIN_PASSWORD="$2"; shift 2 ;;
@@ -104,23 +107,47 @@ if [[ -z "$MAP_KEY" && -s .tianditu_key ]]; then
   MAP_KEY="$(cat .tianditu_key)"
 fi
 
-if [[ -z "$MAP_KEY" && -t 0 ]]; then
-  read -r -p "TianDiTu API key: " MAP_KEY
+if [[ "$MAP_KEY_ARG_PROVIDED" -eq 0 && -t 0 ]]; then
+  if [[ -n "$MAP_KEY" ]]; then
+    read -r -p "TianDiTu API key [press Enter to keep saved key]: " MAP_KEY_INPUT
+    if [[ -n "$MAP_KEY_INPUT" ]]; then
+      MAP_KEY="$MAP_KEY_INPUT"
+    fi
+  else
+    read -r -p "TianDiTu API key: " MAP_KEY
+  fi
 fi
 ensure_non_empty "$MAP_KEY" "TianDiTu API key"
 
-if [[ -z "$ADMIN_USERNAME" && -t 0 ]]; then
-  read -r -p "Default admin username: " ADMIN_USERNAME
+if [[ "$ADMIN_USERNAME_ARG_PROVIDED" -eq 0 && -t 0 ]]; then
+  read -r -p "Default admin username [${ADMIN_USERNAME}]: " ADMIN_USERNAME_INPUT
+  if [[ -n "$ADMIN_USERNAME_INPUT" ]]; then
+    ADMIN_USERNAME="$ADMIN_USERNAME_INPUT"
+  fi
 fi
 ensure_non_empty "$ADMIN_USERNAME" "Default admin username"
 
-if [[ -z "$ADMIN_PASSWORD" && -t 0 ]]; then
-  read -r -s -p "Default admin password (leave blank to auto-generate): " ADMIN_PASSWORD
-  echo
+if [[ "$ADMIN_PASSWORD_ARG_PROVIDED" -eq 0 && -t 0 ]]; then
+  while true; do
+    read -r -s -p "Default admin password: " ADMIN_PASSWORD_INPUT
+    echo
+    read -r -s -p "Confirm admin password: " ADMIN_PASSWORD_CONFIRM
+    echo
+    if [[ -z "$ADMIN_PASSWORD_INPUT" ]]; then
+      echo "[WARN] Password cannot be empty."
+      continue
+    fi
+    if [[ "$ADMIN_PASSWORD_INPUT" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
+      echo "[WARN] Password confirmation mismatch, please retry."
+      continue
+    fi
+    ADMIN_PASSWORD="$ADMIN_PASSWORD_INPUT"
+    break
+  done
 fi
 
 if [[ -z "$ADMIN_PASSWORD" ]]; then
-  echo "[INFO] No admin password entered, generating a secure random password."
+  echo "[INFO] No admin password provided in non-interactive mode, generating a secure random password."
   ADMIN_PASSWORD="$(python3 - <<'PY'
 import secrets, string
 alphabet = string.ascii_letters + string.digits + '!@#$%^&*()_+-=[]{}:,.?'
@@ -129,7 +156,7 @@ PY
 )"
 fi
 
-echo "[INFO] Step 1/6: setup Python env"
+echo "[INFO] Step 1/6: setup Python + Node.js env"
 ./setup_linux.sh
 
 # shellcheck disable=SC1091
@@ -168,7 +195,7 @@ ACCOUNT_EXISTS="$(python - <<PY
 import sqlite3
 name = ${ADMIN_USERNAME@Q}
 con = sqlite3.connect('webgis.db')
-row = con.execute("SELECT id FROM users WHERE UPPER(COALESCE(student_no,'')) = UPPER(?)", (name,)).fetchone()
+row = con.execute("SELECT id FROM users WHERE UPPER(COALESCE(username,'')) = UPPER(?)", (name,)).fetchone()
 print('1' if row else '0')
 PY
 )"
@@ -194,4 +221,3 @@ echo "[OK] Deployment complete."
 echo "[OK] URL: http://127.0.0.1:${PORT}"
 echo "[OK] Default admin username: $ADMIN_USERNAME"
 echo "[OK] Default admin password: $ADMIN_PASSWORD"
-

@@ -87,17 +87,28 @@ python run_local.py
   - `WEBGIS_SYSTEM_ADMIN_PASSWORD` 或 `WEBGIS_SYSTEM_ADMIN_PASSWORD_SHA256`
 - Linux 一键部署脚本会自动创建一个默认管理员网页账号（可自定义用户名和密码）。
 - 如未手动指定默认管理员密码，部署脚本会自动生成并在终端输出一次。
+- 当前数据库结构使用 `users.username` 作为唯一登录名，已不再使用 `student_no`。
 
 ## 5. 命令行账户管理（系统后台无需网页登录）
 
-可直接操作数据库账户（增删改查、重置密码、改角色）：
+可直接操作数据库账户（增删改查、更新资料、重置密码、改角色、解锁、统计）：
 
 ```bash
 python manage_accounts.py list
+python manage_accounts.py show --username zhangsan
 python manage_accounts.py create --name 张三 --username zhangsan --user-type student --password "Abc!2345"
+python manage_accounts.py update --username zhangsan --name "张三(一班)" --status online
 python manage_accounts.py set-role --username zhangsan --user-type admin
 python manage_accounts.py reset-password --username zhangsan --password "XyZ#998877"
+python manage_accounts.py unlock --username zhangsan
+python manage_accounts.py stats
 python manage_accounts.py delete --username zhangsan
+```
+
+重建新版数据库结构（会清空旧数据，不兼容旧库）：
+
+```bash
+python manage_accounts.py reset-schema
 ```
 
 Windows 也可用：

@@ -65,7 +65,7 @@ function AccountApp() {
             api.notify("两次新密码不一致", true);
             return;
         }
-        const passwordErr = api.validatePasswordInput(form.new_password, user?.username || user?.student_no || "");
+        const passwordErr = api.validatePasswordInput(form.new_password, user?.username || "");
         if (passwordErr) {
             api.notify(passwordErr, true);
             return;
@@ -138,7 +138,7 @@ function AccountApp() {
                     <div className="space-y-4">
                         <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
                             <div className="text-sm font-black text-blue-700">{user.name}</div>
-                            <div className="mt-1 text-xs font-semibold text-slate-600">用户名：{user.username || user.student_no || "-"}</div>
+                            <div className="mt-1 text-xs font-semibold text-slate-600">用户名：{user.username || "-"}</div>
                             <div className="mt-1 text-xs font-semibold text-slate-600">角色：{user.user_type === "admin" ? "管理员" : "学生"}</div>
                             {user.must_change_password && (
                                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">
@@ -179,7 +179,7 @@ function AccountApp() {
                                     className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
                                     placeholder="确认新密码"
                                 />
-                                <PasswordStrengthBar password={form.new_password} username={user.username || user.student_no || ""} />
+                                <PasswordStrengthBar password={form.new_password} username={user.username || ""} />
                                 <button
                                     disabled={saving}
                                     className="w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60"

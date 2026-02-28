@@ -56,12 +56,13 @@ function AdminApp() {
 
     const [filters, setFilters] = useState({ q: "", status: "" });
     const [selectedUserId, setSelectedUserId] = useState(null);
+    const [selectedUserIds, setSelectedUserIds] = useState([]);
     const [selectedUser, setSelectedUser] = useState(null);
     const [selectedUserRoutes, setSelectedUserRoutes] = useState([]);
     const [categories, setCategories] = useState([]);
 
     const [onlySelectedStudent, setOnlySelectedStudent] = useState(false);
-    const [selectedRouteId, setSelectedRouteId] = useState("");
+    const [selectedRouteIds, setSelectedRouteIds] = useState([]);
     const [routeCategory, setRouteCategory] = useState("all");
     const [routeKeyword, setRouteKeyword] = useState("");
     const [lineLabelMode, setLineLabelMode] = useState("simple");
@@ -112,6 +113,22 @@ function AdminApp() {
         return allRoutes.filter((r) => Number(r.user_id) === Number(selectedUserId));
     }, [allRoutes, selectedUserId]);
 
+    const selectedUserIdSet = useMemo(() => {
+        const ids = (selectedUserIds || []).map((id) => Number(id));
+        if (selectedUserId && !ids.some((id) => Number(id) === Number(selectedUserId))) {
+            ids.push(Number(selectedUserId));
+        }
+        return new Set(ids);
+    }, [selectedUserIds, selectedUserId]);
+
+    const explicitSelectedUserIdSet = useMemo(() => {
+        return new Set((selectedUserIds || []).map((id) => Number(id)));
+    }, [selectedUserIds]);
+
+    const selectedRouteIdSet = useMemo(() => {
+        return new Set((selectedRouteIds || []).map((id) => String(id)));
+    }, [selectedRouteIds]);
+
     const contextUserRoutes = useMemo(() => {
         const uid = Number(studentContextMenu.user?.id || 0);
         if (!uid) return [];
@@ -119,10 +136,12 @@ function AdminApp() {
     }, [allRoutes, studentContextMenu.user]);
 
     const categoryOptions = useMemo(() => {
-        const base = onlySelectedStudent ? selectedStudentRoutesFromAll : allRoutes;
+        const base = onlySelectedStudent
+            ? allRoutes.filter((r) => selectedUserIdSet.has(Number(r.user_id)))
+            : allRoutes;
         const set = new Set(base.map((r) => r.category).filter(Boolean));
         return ["all", ...Array.from(set)];
-    }, [onlySelectedStudent, selectedStudentRoutesFromAll, allRoutes]);
+    }, [onlySelectedStudent, allRoutes, selectedUserIdSet]);
 
     const filteredAccounts = useMemo(() => {
         const q = accountFilter.q.trim().toLowerCase();
@@ -133,7 +152,7 @@ function AdminApp() {
             if (!q) return true;
             const text = [
                 acc.name,
-                acc.student_no,
+                acc.username,
                 acc.role,
                 acc.status,
             ]
@@ -147,12 +166,12 @@ function AdminApp() {
     const activeRoutes = useMemo(() => {
         let rows = allRoutes;
 
-        if (onlySelectedStudent && selectedUserId) {
-            rows = rows.filter((r) => Number(r.user_id) === Number(selectedUserId));
+        if (onlySelectedStudent) {
+            rows = rows.filter((r) => selectedUserIdSet.has(Number(r.user_id)));
         }
 
-        if (selectedRouteId) {
-            rows = rows.filter((r) => String(r.id) === String(selectedRouteId));
+        if (selectedRouteIds.length > 0) {
+            rows = rows.filter((r) => selectedRouteIdSet.has(String(r.id)));
         }
 
         if (routeCategory !== "all") {
@@ -178,7 +197,7 @@ function AdminApp() {
         }
 
         return rows;
-    }, [allRoutes, onlySelectedStudent, selectedUserId, selectedRouteId, routeCategory, routeKeyword]);
+    }, [allRoutes, onlySelectedStudent, selectedUserIdSet, selectedRouteIds, selectedRouteIdSet, routeCategory, routeKeyword]);
 
     useEffect(() => {
         if (!categoryOptions.includes(routeCategory)) {
@@ -216,9 +235,11 @@ function AdminApp() {
 
         if (list.length === 0) {
             setSelectedUserId(null);
+            setSelectedUserIds([]);
             setSelectedUser(null);
             setSelectedUserRoutes([]);
             setCategories([]);
+            setSelectedRouteIds([]);
             setStudentContextMenu({ open: false, x: 0, y: 0, user: null, routeId: "" });
             return;
         }
@@ -226,6 +247,10 @@ function AdminApp() {
         if (!list.some((u) => Number(u.id) === Number(selectedUserId))) {
             setSelectedUserId(list[0].id);
         }
+        setSelectedUserIds((prev) => {
+            const next = (prev || []).filter((id) => list.some((u) => Number(u.id) === Number(id)));
+            return next;
+        });
     }
 
     async function loadAllRoutes() {
@@ -289,26 +314,18 @@ function AdminApp() {
 
     useEffect(() => {
         if (!selectedUserId) return;
-        setSelectedRouteId("");
         loadSelectedSummary(selectedUserId).catch((err) => api.notify(err.message || "加载学生摘要失败", true));
     }, [selectedUserId]);
 
     useEffect(() => {
         if (!studentContextMenu.open) return;
-
-        const closeMenu = () => {
-            setStudentContextMenu((prev) => (prev.open ? { ...prev, open: false } : prev));
-        };
         const onEsc = (e) => {
-            if (e.key === "Escape") closeMenu();
+            if (e.key === "Escape") {
+                setStudentContextMenu((prev) => (prev.open ? { ...prev, open: false } : prev));
+            }
         };
-
-        document.addEventListener("click", closeMenu);
-        document.addEventListener("contextmenu", closeMenu);
         document.addEventListener("keydown", onEsc);
         return () => {
-            document.removeEventListener("click", closeMenu);
-            document.removeEventListener("contextmenu", closeMenu);
             document.removeEventListener("keydown", onEsc);
         };
     }, [studentContextMenu.open]);
@@ -404,17 +421,21 @@ function AdminApp() {
         routeLayerRef.current.clearLayers();
 
         const effectiveLabelMode = activeRoutes.length > 250 && lineLabelMode === "detail" ? "simple" : lineLabelMode;
+        const hasExplicitLabelSelection = explicitSelectedUserIdSet.size > 0 || selectedRouteIdSet.size > 0;
 
         activeRoutes.forEach((route) => {
             const uid = Number(route.user_id);
             const userInfo = userMap.get(uid);
             const studentName = userInfo?.name || route.user_name || "未知学生";
-            const studentNo = userInfo?.student_no || "";
+            const username = userInfo?.username || "";
 
-            const isSelected = selectedUserId && uid === Number(selectedUserId);
-            const color = isSelected ? "#1d4ed8" : "#93c5fd";
-            const opacity = isSelected ? 0.95 : 0.5;
-            const weight = isSelected ? 3.8 : 2.2;
+            const isFocusUser = selectedUserId && uid === Number(selectedUserId);
+            const isMultiSelectedUser = selectedUserIdSet.has(uid);
+            const isRouteSelected = selectedRouteIdSet.has(String(route.id));
+            const emphasize = isRouteSelected || isFocusUser;
+            const color = emphasize ? "#1d4ed8" : isMultiSelectedUser ? "#3b82f6" : "#93c5fd";
+            const opacity = emphasize ? 0.96 : isMultiSelectedUser ? 0.78 : 0.5;
+            const weight = emphasize ? 3.8 : isMultiSelectedUser ? 3 : 2.2;
 
             const from = [route.origin_lat, route.origin_lon];
             const to = [route.destination_lat, route.destination_lon];
@@ -424,10 +445,11 @@ function AdminApp() {
                 color,
                 weight,
                 opacity,
-                dashArray: isSelected ? "9 6" : "7 8",
+                dashArray: emphasize ? "9 6" : isMultiSelectedUser ? "8 7" : "7 8",
             }).addTo(routeLayerRef.current);
 
-            if (effectiveLabelMode !== "none") {
+            const shouldShowNameLabel = hasExplicitLabelSelection && (isRouteSelected || explicitSelectedUserIdSet.has(uid));
+            if (effectiveLabelMode !== "none" && shouldShowNameLabel) {
                 const labelText = effectiveLabelMode === "detail"
                     ? `${studentName} | ${route.category}`
                     : `${studentName}`;
@@ -441,21 +463,21 @@ function AdminApp() {
             line.bindPopup(
                 `<div style="min-width:220px">` +
                     `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
-                    `录入用户：${studentName}${studentNo ? ` (${studentNo})` : ""}<br/>` +
+                    `录入用户：${studentName}${username ? ` (${username})` : ""}<br/>` +
                     `分类：${route.category}<br/>` +
                     `时间：${api.fmtTime(route.created_at)}` +
                 `</div>`
             );
 
             L.circleMarker(to, {
-                radius: isSelected ? 4.5 : 3.6,
+                radius: emphasize ? 4.6 : isMultiSelectedUser ? 4 : 3.6,
                 color,
                 fillColor: color,
-                fillOpacity: isSelected ? 0.95 : 0.75,
+                fillOpacity: emphasize ? 0.95 : isMultiSelectedUser ? 0.85 : 0.75,
                 weight: 0,
             }).addTo(routeLayerRef.current);
         });
-    }, [activeRoutes, selectedUserId, lineLabelMode, userMap]);
+    }, [activeRoutes, selectedUserId, selectedUserIdSet, selectedRouteIdSet, explicitSelectedUserIdSet, lineLabelMode, userMap]);
 
     function zoomToRoutes(routes) {
         if (!mapRef.current || !routes || routes.length === 0) return;
@@ -479,8 +501,12 @@ function AdminApp() {
 
     function zoomToStudent(userId) {
         setSelectedUserId(userId);
+        setSelectedUserIds((prev) => {
+            const has = (prev || []).some((id) => Number(id) === Number(userId));
+            return has ? prev : [...(prev || []), userId];
+        });
         setOnlySelectedStudent(true);
-        setSelectedRouteId("");
+        setSelectedRouteIds([]);
         const rows = allRoutes.filter((r) => Number(r.user_id) === Number(userId));
         if (rows.length === 0) {
             api.notify("该学生暂无线路数据", true);
@@ -491,35 +517,144 @@ function AdminApp() {
 
     function focusOneRoute(route) {
         setSelectedUserId(route.user_id);
+        setSelectedUserIds((prev) => {
+            const has = (prev || []).some((id) => Number(id) === Number(route.user_id));
+            return has ? prev : [...(prev || []), route.user_id];
+        });
         setOnlySelectedStudent(true);
-        setSelectedRouteId(String(route.id));
+        setSelectedRouteIds([String(route.id)]);
         zoomToRoutes([route]);
     }
 
     function clearMapFilters() {
         setOnlySelectedStudent(false);
-        setSelectedRouteId("");
+        setSelectedRouteIds([]);
         setRouteCategory("all");
         setRouteKeyword("");
     }
 
     function showAllStudentsRoutes() {
         setOnlySelectedStudent(false);
-        setSelectedRouteId("");
+        setSelectedRouteIds([]);
     }
 
     function showSelectedStudentRoutes() {
-        if (!selectedUserId) {
-            api.notify("请先在左侧选择学生", true);
+        if (selectedUserIds.length === 0) {
+            api.notify("请先在左侧选择至少一个学生", true);
             return;
         }
         setOnlySelectedStudent(true);
-        setSelectedRouteId("");
+        setSelectedRouteIds([]);
+    }
+
+    function handleStudentPrimarySelect(userId) {
+        setSelectedUserId(userId);
+        setSelectedUserIds((prev) => {
+            const has = (prev || []).some((id) => Number(id) === Number(userId));
+            return has ? prev : [...(prev || []), userId];
+        });
+    }
+
+    function handleStudentClick(e, user) {
+        const id = Number(user.id);
+        if (e.ctrlKey || e.metaKey) {
+            setSelectedUserId(id);
+            setSelectedUserIds((prev) => {
+                const exists = (prev || []).some((v) => Number(v) === id);
+                if (exists) {
+                    const next = (prev || []).filter((v) => Number(v) !== id);
+                    return next;
+                }
+                return [...(prev || []), id];
+            });
+            return;
+        }
+        setSelectedUserId(id);
+        setSelectedUserIds([id]);
+    }
+
+    function toggleUserSelection(userId, checked) {
+        const id = Number(userId);
+        setSelectedUserIds((prev) => {
+            const exists = (prev || []).some((v) => Number(v) === id);
+            if (checked && !exists) return [...(prev || []), id];
+            if (!checked && exists) return (prev || []).filter((v) => Number(v) !== id);
+            return prev || [];
+        });
+        if (checked) setSelectedUserId(id);
+    }
+
+    function toggleRouteSelection(routeId, checked) {
+        const id = String(routeId);
+        setSelectedRouteIds((prev) => {
+            const exists = (prev || []).some((v) => String(v) === id);
+            if (checked && !exists) return [...(prev || []), id];
+            if (!checked && exists) return (prev || []).filter((v) => String(v) !== id);
+            return prev || [];
+        });
+    }
+
+    function handleRouteRowClick(e, route) {
+        const id = String(route.id);
+        if (e.ctrlKey || e.metaKey) {
+            setSelectedRouteIds((prev) => {
+                const exists = (prev || []).some((v) => String(v) === id);
+                if (exists) return (prev || []).filter((v) => String(v) !== id);
+                return [...(prev || []), id];
+            });
+            return;
+        }
+        setSelectedRouteIds([id]);
+    }
+
+    function focusSelectedRoutes() {
+        if (selectedRouteIds.length === 0) {
+            api.notify("请先勾选至少一条线路", true);
+            return;
+        }
+        setOnlySelectedStudent(true);
+        const routeSet = new Set(selectedRouteIds.map((id) => String(id)));
+        const rows = selectedUserRoutes.filter((r) => routeSet.has(String(r.id)));
+        if (rows.length === 0) {
+            api.notify("已选线路不存在或已被删除", true);
+            return;
+        }
+        zoomToRoutes(rows);
+    }
+
+    async function removeSelectedRoutes() {
+        if (selectedRouteIds.length === 0) {
+            api.notify("请先勾选至少一条线路", true);
+            return;
+        }
+        if (!window.confirm(`确认删除已选的 ${selectedRouteIds.length} 条线路？`)) {
+            return;
+        }
+        setRouteDeleteBusyId("batch");
+        try {
+            const ids = [...selectedRouteIds];
+            for (const id of ids) {
+                await api.del(`/api/routes/${id}`);
+            }
+            setSelectedRouteIds([]);
+            api.notify(`已删除 ${ids.length} 条线路`);
+            await Promise.all([
+                loadAllRoutes(),
+                loadUsers(),
+                loadOverview(),
+                selectedUserId ? loadSelectedSummary(selectedUserId) : Promise.resolve(),
+            ]);
+        } catch (err) {
+            api.notify(err.message || "批量删除线路失败", true);
+        } finally {
+            setRouteDeleteBusyId(null);
+        }
     }
 
     function openStudentContextMenu(e, user) {
         e.preventDefault();
-        setSelectedUserId(user.id);
+        e.stopPropagation();
+        handleStudentPrimarySelect(user.id);
         setStudentContextMenu({
             open: true,
             x: e.clientX,
@@ -534,9 +669,9 @@ function AdminApp() {
         const user = studentContextMenu.user;
         if (!user) return;
         if (!routeId) {
-            setSelectedUserId(user.id);
+            handleStudentPrimarySelect(user.id);
             setOnlySelectedStudent(true);
-            setSelectedRouteId("");
+            setSelectedRouteIds([]);
             zoomToStudent(user.id);
             return;
         }
@@ -604,8 +739,10 @@ function AdminApp() {
         }
         setExportingPoster(true);
         try {
-            const who = me?.name || me?.username || me?.student_no || "";
-            const subtitle = onlySelectedStudent ? "教师端筛选导出（仅当前学生）" : "教师端筛选导出（全体可见）";
+            const who = me?.name || me?.username || "";
+            const subtitle = onlySelectedStudent
+                ? `教师端筛选导出（${selectedUserIds.length}名学生）`
+                : "教师端筛选导出（全体可见）";
             await window.odExport.downloadPoster(activeRoutes, {
                 format,
                 title: "OD 全量/筛选线路导出图",
@@ -694,14 +831,15 @@ function AdminApp() {
     }
 
     async function removeAccount(account) {
-        if (!window.confirm(`确认删除账户 ${account.name}（${account.username || account.student_no || "无用户名"}）？该账户所有线路也会删除。`)) {
+        if (!window.confirm(`确认删除账户 ${account.name}（${account.username || "无用户名"}）？该账户所有线路也会删除。`)) {
             return;
         }
         const deletedIsSelected = Number(selectedUserId) === Number(account.id);
         const summaryTargetId = deletedIsSelected ? null : selectedUserId;
         if (deletedIsSelected) {
             setSelectedUserId(null);
-            setSelectedRouteId("");
+            setSelectedUserIds((prev) => (prev || []).filter((id) => Number(id) !== Number(account.id)));
+            setSelectedRouteIds([]);
             setSelectedUser(null);
             setSelectedUserRoutes([]);
             setCategories([]);
@@ -710,6 +848,7 @@ function AdminApp() {
         try {
             await api.del(`/api/admin/accounts/${account.id}`);
             api.notify("账户已删除");
+            setSelectedUserIds((prev) => (prev || []).filter((id) => Number(id) !== Number(account.id)));
             setStudentContextMenu((prev) => ({ ...prev, open: false, routeId: "" }));
             await Promise.all([
                 loadAccounts(),
@@ -739,9 +878,7 @@ function AdminApp() {
         setRouteDeleteBusyId(route.id);
         try {
             await api.del(`/api/routes/${route.id}`);
-            if (String(selectedRouteId) === String(route.id)) {
-                setSelectedRouteId("");
-            }
+            setSelectedRouteIds((prev) => (prev || []).filter((id) => String(id) !== String(route.id)));
             api.notify("线路已删除");
             setStudentContextMenu((prev) => ({ ...prev, open: false, routeId: "" }));
             await Promise.all([
@@ -772,7 +909,7 @@ function AdminApp() {
         setDeleteUserRoutesBusy(true);
         try {
             const res = await api.del(`/api/admin/accounts/${targetUser.id}/routes`);
-            setSelectedRouteId("");
+            setSelectedRouteIds([]);
             setStudentContextMenu((prev) => ({ ...prev, open: false, routeId: "" }));
             api.notify(`已删除 ${api.fmtNumber(res.deleted_count || 0)} 条线路`);
             await Promise.all([
@@ -796,7 +933,7 @@ function AdminApp() {
             api.notify("请输入新密码", true);
             return;
         }
-        const passwordErr = api.validatePasswordInput(newPassword, account.username || account.student_no || "");
+        const passwordErr = api.validatePasswordInput(newPassword, account.username || "");
         if (passwordErr) {
             api.notify(passwordErr, true);
             return;
@@ -821,7 +958,7 @@ function AdminApp() {
             api.notify("两次新密码不一致", true);
             return;
         }
-        const passwordErr = api.validatePasswordInput(passwordForm.new_password, me?.username || me?.student_no || "");
+        const passwordErr = api.validatePasswordInput(passwordForm.new_password, me?.username || "");
         if (passwordErr) {
             api.notify(passwordErr, true);
             return;
@@ -870,7 +1007,7 @@ function AdminApp() {
                         <div className="text-sm font-semibold text-slate-500">全局线路总览、学生筛选与账户治理</div>
                         {me && (
                             <div className="mt-0.5 text-xs font-semibold text-slate-500">
-                                当前账户：{me.name}（{me.username || me.student_no || "-"}）
+                                当前账户：{me.name}（{me.username || "-"}）
                             </div>
                         )}
                     </div>
@@ -916,22 +1053,41 @@ function AdminApp() {
                             <option value="online">在线</option>
                             <option value="offline">离线</option>
                         </select>
+                        <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-2 py-1 text-xs font-semibold text-slate-600">
+                            已多选学生：{selectedUserIds.length} 人（支持 Ctrl/⌘ + 单击 快速多选）
+                        </div>
                     </div>
 
                     <div className="max-h-[62vh] space-y-2 overflow-auto pr-1">
                         {users.map((u) => (
-                            <button
+                            <div
                                 key={u.id}
-                                onClick={() => setSelectedUserId(u.id)}
+                                onClick={(e) => handleStudentClick(e, u)}
                                 onDoubleClick={() => zoomToStudent(u.id)}
                                 onContextMenu={(e) => openStudentContextMenu(e, u)}
                                 className={`w-full rounded-xl border p-2 text-left ${
-                                    Number(selectedUserId) === Number(u.id)
+                                    Number(selectedUserId) === Number(u.id) || selectedUserIdSet.has(Number(u.id))
                                         ? "border-admin-300 bg-blue-50"
                                         : "border-blue-100 bg-white"
                                 }`}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        handleStudentClick(e, u);
+                                    }
+                                }}
                             >
                                 <div className="flex items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedUserIdSet.has(Number(u.id))}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => toggleUserSelection(u.id, e.target.checked)}
+                                        className="h-4 w-4"
+                                        title="加入多选"
+                                    />
                                     <img
                                         src={u.avatar_url || "/static/images/avatar-default.svg"}
                                         alt={u.name}
@@ -940,7 +1096,7 @@ function AdminApp() {
                                     <div className="min-w-0 flex-1">
                                         <div className="truncate text-sm font-bold text-slate-700">{u.name}</div>
                                         <div className="truncate text-xs font-semibold text-slate-500">
-                                            用户名：{u.username || u.student_no || "未设置"}
+                                            用户名：{u.username || "未设置"}
                                         </div>
                                     </div>
                                     <div className="text-right text-xs font-bold text-slate-500">
@@ -948,7 +1104,7 @@ function AdminApp() {
                                         <div>{u.status}</div>
                                     </div>
                                 </div>
-                            </button>
+                            </div>
                         ))}
 
                         {users.length === 0 && (
@@ -997,42 +1153,32 @@ function AdminApp() {
                             <button
                                 type="button"
                                 onClick={showSelectedStudentRoutes}
-                                disabled={!selectedUserId}
+                                disabled={selectedUserIds.length === 0}
                                 className={`rounded-md border px-2 py-1 text-xs font-bold disabled:opacity-60 ${onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
                             >
                                 仅选中学生
                             </button>
                         </div>
 
-                        <div className="mt-2 text-xs font-semibold text-slate-500">特定线路筛选（选中学生）</div>
-                        <select
-                            value={selectedRouteId}
-                            onChange={(e) => {
-                                setOnlySelectedStudent(true);
-                                setSelectedRouteId(e.target.value);
-                            }}
-                            className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
-                            disabled={!selectedUserId}
-                        >
-                            <option value="">全部线路</option>
-                            {selectedUserRoutes.map((route) => (
-                                <option key={route.id} value={route.id}>
-                                    {routeBrief(route)} | {route.category}
-                                </option>
-                            ))}
-                        </select>
-                        <div className="mt-1 flex items-center justify-end">
+                        <div className="mt-2 text-xs font-semibold text-slate-500">
+                            线路多选筛选：已选 {selectedRouteIds.length} 条（在右侧“选中学生线路”勾选）
+                        </div>
+                        <div className="mt-1 flex items-center gap-2">
                             <button
                                 type="button"
-                                disabled={!selectedRouteId}
-                                onClick={() => {
-                                    const route = selectedUserRoutes.find((r) => String(r.id) === String(selectedRouteId));
-                                    if (!route) return;
-                                    focusOneRoute(route);
-                                }}
+                                disabled={selectedRouteIds.length === 0}
+                                onClick={focusSelectedRoutes}
                                 className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
                             >
-                                展示该线路
+                                展示已选线路
+                            </button>
+                            <button
+                                type="button"
+                                disabled={selectedRouteIds.length === 0}
+                                onClick={() => setSelectedRouteIds([])}
+                                className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                            >
+                                清空线路多选
                             </button>
                         </div>
 
@@ -1113,7 +1259,7 @@ function AdminApp() {
                                 </div>
                                 <div className="text-lg font-black text-admin-600">{selectedUser.name}</div>
                                 <div className="text-xs font-semibold text-slate-500">
-                                    用户名：{selectedUser.username || selectedUser.student_no || "未设置"} | 状态：{selectedUser.status}
+                                    用户名：{selectedUser.username || "未设置"} | 状态：{selectedUser.status}
                                 </div>
                                 <div className="mt-2 text-xs font-semibold text-slate-600">
                                     路线：{api.fmtNumber(selectedUser.route_count)} 条
@@ -1143,30 +1289,100 @@ function AdminApp() {
                     <div className="rounded-xl border border-blue-100 p-3">
                         <div className="mb-2 flex items-center justify-between">
                             <div className="text-sm font-black text-admin-600">选中学生线路</div>
-                            <button
-                                onClick={() => {
-                                    if (!selectedUserId) return;
-                                    zoomToStudent(selectedUserId);
-                                }}
-                                className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
-                            >
-                                一键定位学生
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        if (!selectedUserId) return;
+                                        zoomToStudent(selectedUserId);
+                                    }}
+                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
+                                >
+                                    一键定位学生
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={selectedUserRoutes.length === 0}
+                                    onClick={() => setSelectedRouteIds(selectedUserRoutes.map((r) => String(r.id)))}
+                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                >
+                                    全选线路
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={selectedRouteIds.length === 0}
+                                    onClick={() => setSelectedRouteIds([])}
+                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                >
+                                    清空多选
+                                </button>
+                            </div>
                         </div>
+                        <div className="mb-2 flex items-center justify-between">
+                            <div className="text-xs font-semibold text-slate-500">已勾选线路：{selectedRouteIds.length} 条</div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    disabled={selectedRouteIds.length === 0}
+                                    onClick={focusSelectedRoutes}
+                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                >
+                                    展示已选
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={selectedRouteIds.length === 0 || !!routeDeleteBusyId}
+                                    onClick={removeSelectedRoutes}
+                                    className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 disabled:opacity-60"
+                                >
+                                    {routeDeleteBusyId === "batch" ? "删除中..." : "删除已选"}
+                                </button>
+                            </div>
+                        </div>
+                        <div className="mb-2 text-xs font-semibold text-slate-500">支持 Ctrl/⌘ + 单击 进行线路多选，双击可直接定位线路</div>
                         <div className="max-h-[240px] space-y-2 overflow-auto pr-1">
                             {selectedUserRoutes.slice(0, 16).map((route) => (
-                                <div key={route.id} className="rounded-lg border border-blue-100 bg-blue-50/40 p-2">
-                                    <div className="truncate text-sm font-bold text-slate-700">{routeBrief(route)}</div>
+                                <div
+                                    key={route.id}
+                                    onClick={(e) => handleRouteRowClick(e, route)}
+                                    onDoubleClick={() => zoomToRoutes([route])}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            handleRouteRowClick(e, route);
+                                        }
+                                    }}
+                                    className={`rounded-lg border p-2 transition-all duration-200 ${
+                                        selectedRouteIdSet.has(String(route.id)) ? "border-admin-300 bg-blue-50" : "border-blue-100 bg-blue-50/40"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedRouteIdSet.has(String(route.id))}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={(e) => toggleRouteSelection(route.id, e.target.checked)}
+                                            className="h-4 w-4"
+                                        />
+                                        <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700">{routeBrief(route)}</div>
+                                    </div>
                                     <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
                                     <div className="mt-1 flex items-center justify-end gap-2">
                                         <button
-                                            onClick={() => zoomToRoutes([route])}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                zoomToRoutes([route]);
+                                            }}
                                             className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
                                         >
                                             定位
                                         </button>
                                         <button
-                                            onClick={() => focusOneRoute(route)}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                focusOneRoute(route);
+                                            }}
                                             className="rounded-md border border-admin-200 bg-admin-50 px-2 py-1 text-xs font-bold text-admin-600"
                                         >
                                             仅显示此线路
@@ -1184,6 +1400,18 @@ function AdminApp() {
                 )}
             </main>
 
+            {studentContextMenu.open && (
+                <div
+                    className="fixed inset-0 z-[1390]"
+                    onMouseDown={(e) => {
+                        if (e.button !== 2) {
+                            setStudentContextMenu((prev) => ({ ...prev, open: false }));
+                        }
+                    }}
+                    onContextMenu={(e) => e.preventDefault()}
+                />
+            )}
+
             {studentContextMenu.open && studentContextMenu.user && (
                 <div
                     className="fixed z-[1400] w-[min(90vw,320px)] rounded-xl border border-blue-100 bg-white p-3 shadow-soft ios-pop-in"
@@ -1191,12 +1419,13 @@ function AdminApp() {
                         left: Math.max(8, Math.min(studentContextMenu.x, window.innerWidth - 330)),
                         top: Math.max(8, Math.min(studentContextMenu.y, window.innerHeight - 360)),
                     }}
+                    onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                     onContextMenu={(e) => e.preventDefault()}
                 >
                     <div className="text-sm font-black text-admin-600">{studentContextMenu.user.name}</div>
                     <div className="text-xs font-semibold text-slate-500">
-                        用户名：{studentContextMenu.user.username || studentContextMenu.user.student_no || "未设置"}
+                        用户名：{studentContextMenu.user.username || "未设置"}
                     </div>
 
                     <div className="mt-2 flex items-center gap-2">
@@ -1213,6 +1442,7 @@ function AdminApp() {
                         <button
                             type="button"
                             onClick={() => {
+                                setSelectedUserIds([studentContextMenu.user.id]);
                                 zoomToStudent(studentContextMenu.user.id);
                                 setStudentContextMenu((prev) => ({ ...prev, open: false }));
                             }}

@@ -8,6 +8,8 @@ TAILWIND_VERSION="${TAILWIND_VERSION:-v3.4.17}"
 INPUT_FILE="${TAILWIND_INPUT_FILE:-static/css/tailwind.input.css}"
 OUTPUT_FILE="${TAILWIND_OUTPUT_FILE:-static/css/tailwind.generated.css}"
 CONFIG_FILE="${TAILWIND_CONFIG_FILE:-tailwind.config.js}"
+NPM_BIN="${NPM_BIN:-npm}"
+TAILWIND_USE_STANDALONE="${TAILWIND_USE_STANDALONE:-0}"
 
 download_file() {
   local url="$1"
@@ -25,6 +27,23 @@ download_file() {
 }
 
 resolve_tailwind_bin() {
+  if [[ "$TAILWIND_USE_STANDALONE" != "1" ]]; then
+    if command -v "$NPM_BIN" >/dev/null 2>&1 && [[ -f "$ROOT_DIR/package.json" ]]; then
+      if [[ ! -x "$ROOT_DIR/node_modules/.bin/tailwindcss" ]]; then
+        echo "[INFO] Installing Node dependencies for Tailwind build ..." >&2
+        if [[ -f "$ROOT_DIR/package-lock.json" ]]; then
+          "$NPM_BIN" ci --no-audit --no-fund >&2
+        else
+          "$NPM_BIN" install --no-audit --no-fund >&2
+        fi
+      fi
+      if [[ -x "$ROOT_DIR/node_modules/.bin/tailwindcss" ]]; then
+        echo "$ROOT_DIR/node_modules/.bin/tailwindcss"
+        return 0
+      fi
+    fi
+  fi
+
   if [[ -n "${TAILWIND_BIN:-}" ]]; then
     if [[ ! -x "$TAILWIND_BIN" ]]; then
       echo "[ERROR] TAILWIND_BIN is set but not executable: $TAILWIND_BIN"

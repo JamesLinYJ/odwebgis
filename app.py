@@ -30,6 +30,7 @@ TIANDITU_API_KEY_ENV = "TIANDITU_API_KEY"
 TIANDITU_API_KEY_FILE = os.path.join(BASE_DIR, ".tianditu_key")
 TILE_RATE_LIMIT_PER_MIN = 900
 TILE_RATE_WINDOW_SECONDS = 60
+SCHEMA_VERSION = "20260228_v2"
 _tile_rate_buckets: dict[str, deque[float]] = {}
 
 
@@ -181,15 +182,11 @@ def build_system_admin_user(status: str = "online") -> dict[str, Any]:
     return {
         "id": 0,
         "name": "系统后台管理员",
-        "role": "系统管理员",
         "status": user_status_label(status),
         "status_code": normalize_user_status(status),
         "avatar_url": LOCAL_DEFAULT_AVATAR,
-        "focus_topic": "系统管理",
         "user_type": "admin",
-        "student_no": account,
         "username": account,
-        "class_name": "",
         "created_at": now,
         "last_active_at": now,
         "force_password_change": 0,
@@ -399,7 +396,6 @@ def create_app() -> Flask:
         name = (payload.get("name") or "").strip()
         username = (
             payload.get("username")
-            or payload.get("student_no")
             or payload.get("account")
             or ""
         ).strip()
@@ -418,7 +414,7 @@ def create_app() -> Flask:
         exists = db.execute(
             """
             SELECT id FROM users
-            WHERE UPPER(COALESCE(student_no, '')) = UPPER(?)
+            WHERE UPPER(COALESCE(username, '')) = UPPER(?)
             """,
             (username,),
         ).fetchone()
@@ -431,21 +427,16 @@ def create_app() -> Flask:
         cur = db.execute(
             """
             INSERT INTO users(
-                name, role, region, status, avatar_url, focus_topic,
-                user_type, student_no, class_name, password_hash, created_at, last_active_at,
+                name, username, user_type, status, avatar_url, password_hash, created_at, last_active_at,
                 force_password_change, failed_login_count, lock_until
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 name,
-                "学生",
-                "",
+                username,
+                "student",
                 "offline",
                 avatar_url,
-                "课堂演示",
-                "student",
-                username,
-                "",
                 generate_password_hash(normalize_password_secret(password)),
                 now,
                 now,
@@ -472,7 +463,6 @@ def create_app() -> Flask:
         account = (
             payload.get("account")
             or payload.get("username")
-            or payload.get("student_no")
             or ""
         ).strip()
         password = (payload.get("password") or "").strip()
@@ -508,7 +498,7 @@ def create_app() -> Flask:
                    lock_until,
                    COALESCE(force_password_change, 0) AS force_password_change
             FROM users
-            WHERE UPPER(COALESCE(student_no, '')) = UPPER(?)
+            WHERE UPPER(COALESCE(username, '')) = UPPER(?)
             """,
             (account,),
         ).fetchone()
@@ -599,7 +589,7 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "message": "请输入旧密码和新密码"}), 400
         if not is_valid_sha256_secret(old_password):
             return jsonify({"ok": False, "message": "密码加密格式无效，请刷新页面后重试"}), 400
-        password_err = validate_password_strength(new_password, user["student_no"] or "")
+        password_err = validate_password_strength(new_password, user["username"] or "")
         if password_err:
             return jsonify({"ok": False, "message": password_err}), 400
 
@@ -847,7 +837,7 @@ def create_app() -> Flask:
                 """
                 AND (
                     u.name LIKE ? OR u.id LIKE ?
-                    OR COALESCE(u.student_no, '') LIKE ? OR u.status LIKE ?
+                    OR COALESCE(u.username, '') LIKE ? OR u.status LIKE ?
                 )
                 """
             )
@@ -1103,12 +1093,12 @@ def create_app() -> Flask:
             sql.append(
                 """
                 AND (
-                    u.name LIKE ? OR COALESCE(u.student_no, '') LIKE ?
-                    OR u.role LIKE ? OR u.status LIKE ?
+                    u.name LIKE ? OR COALESCE(u.username, '') LIKE ?
+                    OR u.status LIKE ?
                 )
                 """
             )
-            params.extend([like, like, like, like])
+            params.extend([like, like, like])
         if user_type in {"student", "admin"}:
             sql.append("AND u.user_type = ?")
             params.append(user_type)
@@ -1131,7 +1121,6 @@ def create_app() -> Flask:
         account = (
             payload.get("username")
             or payload.get("account")
-            or payload.get("student_no")
             or ""
         ).strip()
         password = (payload.get("password") or "").strip()
@@ -1150,7 +1139,7 @@ def create_app() -> Flask:
 
         db = get_db()
         exists = db.execute(
-            "SELECT id FROM users WHERE UPPER(COALESCE(student_no, '')) = UPPER(?)",
+            "SELECT id FROM users WHERE UPPER(COALESCE(username, '')) = UPPER(?)",
             (account,),
         ).fetchone()
         if exists is not None:
@@ -1159,35 +1148,19 @@ def create_app() -> Flask:
         now = utc_now_text()
         avatar_url = LOCAL_DEFAULT_AVATAR
 
-        if user_type == "admin":
-            role = "管理员"
-            default_region = ""
-            default_class = ""
-            focus_topic = "系统管理"
-        else:
-            role = "学生"
-            default_region = ""
-            default_class = ""
-            focus_topic = "课堂演示"
-
         cur = db.execute(
             """
             INSERT INTO users(
-                name, role, region, status, avatar_url, focus_topic,
-                user_type, student_no, class_name, password_hash, created_at, last_active_at,
+                name, username, user_type, status, avatar_url, password_hash, created_at, last_active_at,
                 force_password_change, failed_login_count, lock_until
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 name,
-                role,
-                default_region,
+                account,
+                user_type,
                 "offline",
                 avatar_url,
-                focus_topic,
-                user_type,
-                account,
-                default_class,
                 generate_password_hash(normalize_password_secret(password)),
                 now,
                 now,
@@ -1260,10 +1233,10 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "message": "请输入新密码"}), 400
 
         db = get_db()
-        target = db.execute("SELECT id, student_no FROM users WHERE id = ?", (account_id,)).fetchone()
+        target = db.execute("SELECT id, username FROM users WHERE id = ?", (account_id,)).fetchone()
         if target is None:
             return jsonify({"ok": False, "message": "账户不存在"}), 404
-        password_err = validate_password_strength(new_password, target["student_no"] or "")
+        password_err = validate_password_strength(new_password, target["username"] or "")
         if password_err:
             return jsonify({"ok": False, "message": password_err}), 400
 
@@ -1296,7 +1269,7 @@ def create_app() -> Flask:
         db = get_db()
         rows = db.execute(
             """
-            SELECT u.id, u.name, u.status, u.role, u.student_no,
+            SELECT u.id, u.name, u.status, u.user_type, u.username,
                    COUNT(r.id) AS route_count,
                    u.last_active_at
             FROM users u
@@ -1316,9 +1289,9 @@ def create_app() -> Flask:
                 [
                     r["id"],
                     r["name"],
-                    r["student_no"] or "",
+                    r["username"] or "",
                     user_status_label(r["status"]),
-                    r["role"],
+                    "管理员" if r["user_type"] == "admin" else "学生",
                     r["route_count"],
                     r["last_active_at"],
                 ]
@@ -1537,11 +1510,12 @@ def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     result.pop("password_hash", None)
     result.pop("failed_login_count", None)
     result.pop("lock_until", None)
-    result.pop("region", None)
+    result.pop("password_updated_at", None)
     status_code = normalize_user_status(result.get("status"))
     result["status_code"] = status_code
     result["status"] = user_status_label(status_code)
-    result["username"] = result.get("student_no") or ""
+    result["username"] = result.get("username") or ""
+    result["role"] = "管理员" if result.get("user_type") == "admin" else "学生"
     result["must_change_password"] = bool(int(result.get("force_password_change") or 0))
     result["route_count"] = int(result.get("route_count", 0))
     result["is_system_admin"] = False
@@ -1551,179 +1525,88 @@ def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
 def init_db() -> None:
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
+    db.execute("PRAGMA foreign_keys = ON")
+    db.execute("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    version_row = db.execute("SELECT value FROM app_meta WHERE key = 'schema_version'").fetchone()
+    current_version = (version_row["value"] if version_row else "").strip()
 
-    db.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            role TEXT NOT NULL,
-            region TEXT NOT NULL,
-            status TEXT NOT NULL,
-            avatar_url TEXT,
-            focus_topic TEXT,
-            user_type TEXT NOT NULL DEFAULT 'student',
-            student_no TEXT,
-            class_name TEXT,
-            password_hash TEXT,
-            failed_login_count INTEGER NOT NULL DEFAULT 0,
-            lock_until TEXT,
-            force_password_change INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT,
-            last_active_at TEXT NOT NULL
-        );
+    if current_version != SCHEMA_VERSION:
+        db.executescript(
+            """
+            DROP TABLE IF EXISTS alerts;
+            DROP TABLE IF EXISTS od_routes;
+            DROP TABLE IF EXISTS nodes;
+            DROP TABLE IF EXISTS users;
 
-        CREATE TABLE IF NOT EXISTS nodes (
-            code TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            region TEXT NOT NULL,
-            lat REAL NOT NULL,
-            lon REAL NOT NULL
-        );
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                user_type TEXT NOT NULL CHECK(user_type IN ('student', 'admin')),
+                status TEXT NOT NULL DEFAULT 'offline' CHECK(status IN ('online', 'offline')),
+                avatar_url TEXT NOT NULL DEFAULT '/static/images/avatar-default.svg',
+                password_hash TEXT NOT NULL,
+                failed_login_count INTEGER NOT NULL DEFAULT 0 CHECK(failed_login_count >= 0),
+                lock_until TEXT,
+                force_password_change INTEGER NOT NULL DEFAULT 0 CHECK(force_password_change IN (0, 1)),
+                created_at TEXT NOT NULL,
+                last_active_at TEXT NOT NULL
+            );
 
-        CREATE TABLE IF NOT EXISTS od_routes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            origin_code TEXT,
-            origin_name TEXT NOT NULL,
-            origin_lat REAL NOT NULL,
-            origin_lon REAL NOT NULL,
-            destination_code TEXT,
-            destination_name TEXT NOT NULL,
-            destination_lat REAL NOT NULL,
-            destination_lon REAL NOT NULL,
-            category TEXT NOT NULL,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
+            CREATE INDEX idx_users_user_type ON users(user_type);
+            CREATE INDEX idx_users_status ON users(status);
+            CREATE INDEX idx_users_last_active ON users(last_active_at);
 
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            level TEXT NOT NULL,
-            message TEXT NOT NULL,
-            active INTEGER NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        """
-    )
+            CREATE TABLE nodes (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                region TEXT NOT NULL,
+                lat REAL NOT NULL,
+                lon REAL NOT NULL
+            );
 
-    ensure_user_columns(db)
-    ensure_routes_schema(db)
-    cleanup_legacy_seed_admin(db)
+            CREATE TABLE od_routes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                origin_code TEXT,
+                origin_name TEXT NOT NULL,
+                origin_lat REAL NOT NULL,
+                origin_lon REAL NOT NULL,
+                destination_code TEXT,
+                destination_name TEXT NOT NULL,
+                destination_lat REAL NOT NULL,
+                destination_lon REAL NOT NULL,
+                category TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX idx_routes_user_id ON od_routes(user_id);
+            CREATE INDEX idx_routes_category ON od_routes(category);
+            CREATE INDEX idx_routes_created_at ON od_routes(created_at);
+
+            CREATE TABLE alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                level TEXT NOT NULL,
+                message TEXT NOT NULL,
+                active INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO app_meta(key, value)
+            VALUES('schema_version', ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (SCHEMA_VERSION,),
+        )
+        print(f"[INFO] 数据库结构已重建为新版（schema={SCHEMA_VERSION}），旧数据已丢弃。")
 
     db.commit()
     db.close()
-
-
-def ensure_user_columns(db: sqlite3.Connection) -> None:
-    columns = {r["name"] for r in db.execute("PRAGMA table_info(users)").fetchall()}
-
-    if "user_type" not in columns:
-        db.execute("ALTER TABLE users ADD COLUMN user_type TEXT NOT NULL DEFAULT 'student'")
-    if "student_no" not in columns:
-        db.execute("ALTER TABLE users ADD COLUMN student_no TEXT")
-    if "class_name" not in columns:
-        db.execute("ALTER TABLE users ADD COLUMN class_name TEXT")
-    if "password_hash" not in columns:
-        db.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
-    if "failed_login_count" not in columns:
-        db.execute("ALTER TABLE users ADD COLUMN failed_login_count INTEGER NOT NULL DEFAULT 0")
-    if "lock_until" not in columns:
-        db.execute("ALTER TABLE users ADD COLUMN lock_until TEXT")
-    if "force_password_change" not in columns:
-        db.execute("ALTER TABLE users ADD COLUMN force_password_change INTEGER NOT NULL DEFAULT 0")
-    if "created_at" not in columns:
-        db.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
-        db.execute(
-            """
-            UPDATE users
-            SET created_at = COALESCE(last_active_at, datetime('now'))
-            WHERE created_at IS NULL OR created_at = ''
-            """
-        )
-    db.execute(
-        """
-        UPDATE users
-        SET failed_login_count = COALESCE(failed_login_count, 0),
-            force_password_change = COALESCE(force_password_change, 0)
-        """
-    )
-    db.execute(
-        """
-        UPDATE users
-        SET status = CASE
-            WHEN LOWER(COALESCE(status, '')) IN ('online', '在线') THEN 'online'
-            WHEN LOWER(COALESCE(status, '')) IN ('offline', '离线') THEN 'offline'
-            ELSE 'offline'
-        END
-        """
-    )
-    db.execute(
-        """
-        UPDATE users
-        SET avatar_url = ?
-        WHERE avatar_url LIKE 'https://i.pravatar.cc/%'
-           OR avatar_url LIKE 'http://i.pravatar.cc/%'
-        """,
-        (LOCAL_DEFAULT_AVATAR,),
-    )
-
-
-def ensure_routes_schema(db: sqlite3.Connection) -> None:
-    columns = [r["name"] for r in db.execute("PRAGMA table_info(od_routes)").fetchall()]
-    if not columns:
-        return
-    if "flow_weight" not in columns:
-        return
-
-    db.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS od_routes_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            origin_code TEXT,
-            origin_name TEXT NOT NULL,
-            origin_lat REAL NOT NULL,
-            origin_lon REAL NOT NULL,
-            destination_code TEXT,
-            destination_name TEXT NOT NULL,
-            destination_lat REAL NOT NULL,
-            destination_lon REAL NOT NULL,
-            category TEXT NOT NULL,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-
-        INSERT INTO od_routes_new(
-            id, user_id, origin_code, origin_name, origin_lat, origin_lon,
-            destination_code, destination_name, destination_lat, destination_lon,
-            category, status, created_at
-        )
-        SELECT
-            id, user_id, origin_code, origin_name, origin_lat, origin_lon,
-            destination_code, destination_name, destination_lat, destination_lon,
-            category, status, created_at
-        FROM od_routes;
-
-        DROP TABLE od_routes;
-        ALTER TABLE od_routes_new RENAME TO od_routes;
-        """
-    )
-
-
-def cleanup_legacy_seed_admin(db: sqlite3.Connection) -> None:
-    if not system_admin_enabled():
-        return
-    db.execute(
-        """
-        DELETE FROM users
-        WHERE user_type = 'admin'
-          AND name = '系统管理员'
-          AND UPPER(COALESCE(student_no, '')) IN ('ADMIN001', 'ADMIN_SYS')
-        """
-    )
 
 
 app = create_app()

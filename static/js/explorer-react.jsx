@@ -584,7 +584,7 @@ function ExplorerApp() {
     }
     setExportingPoster(true);
     try {
-      const who = me?.name || me?.username || me?.student_no || "";
+      const who = me?.name || me?.username || "";
       await window.odExport.downloadPoster(routes, {
         format,
         title: "OD 流向图导出",
@@ -708,7 +708,7 @@ function ExplorerApp() {
           <div>
             <div className="text-xl font-black text-brand-700 sm:text-2xl">OD 流向录入与分析</div>
             <div className="text-xs font-semibold text-slate-500 sm:text-sm">学生端 | 地图点选、十进制度与度分秒双模式录入</div>
-            {me && <div className="text-xs font-semibold text-slate-500">当前用户：{me.username || me.student_no || "-"}</div>}
+            {me && <div className="text-xs font-semibold text-slate-500">当前用户：{me.username || "-"}</div>}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => Promise.all([loadMe(), loadRoutes()])} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">刷新</button>

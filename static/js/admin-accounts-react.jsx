@@ -52,7 +52,7 @@ function AdminAccountsApp() {
         return accounts.filter((acc) => {
             if (filter.user_type !== "all" && acc.user_type !== filter.user_type) return false;
             if (!q) return true;
-            const text = [acc.name, acc.username, acc.student_no, acc.role, acc.status].filter(Boolean).join(" ").toLowerCase();
+            const text = [acc.name, acc.username, acc.role, acc.status].filter(Boolean).join(" ").toLowerCase();
             return text.includes(q);
         });
     }, [accounts, filter]);
@@ -140,7 +140,7 @@ function AdminAccountsApp() {
     }
 
     async function removeAccount(acc) {
-        const target = `${acc.name}（${acc.username || acc.student_no || "-"}）`;
+        const target = `${acc.name}（${acc.username || "-"}）`;
         if (!window.confirm(`确认删除账户 ${target}？此操作会删除该账户的所有线路数据。`)) {
             return;
         }
@@ -183,7 +183,7 @@ function AdminAccountsApp() {
             api.notify("两次新密码不一致", true);
             return;
         }
-        const username = resetModal.account.username || resetModal.account.student_no || "";
+        const username = resetModal.account.username || "";
         const passwordErr = api.validatePasswordInput(resetModal.password, username);
         if (passwordErr) {
             api.notify(passwordErr, true);
@@ -326,7 +326,7 @@ function AdminAccountsApp() {
                                     <div className="min-w-0">
                                         <div className="truncate text-sm font-bold text-slate-700">{acc.name}</div>
                                         <div className="truncate text-xs font-semibold text-slate-500">
-                                            用户名：{acc.username || acc.student_no || "-"} | {acc.user_type === "admin" ? "管理员" : "学生"}
+                                            用户名：{acc.username || "-"} | {acc.user_type === "admin" ? "管理员" : "学生"}
                                         </div>
                                         <div className="truncate text-xs font-semibold text-slate-500">
                                             状态：{acc.status} | 线路：{api.fmtNumber(acc.route_count)} 条
@@ -367,7 +367,7 @@ function AdminAccountsApp() {
                     <form onSubmit={submitResetPassword} className="ios-card w-[min(92vw,420px)] rounded-2xl border border-blue-100 bg-white p-4 shadow-soft">
                         <div className="mb-2 text-lg font-black text-admin-600">重置密码</div>
                         <div className="mb-3 text-xs font-semibold text-slate-500">
-                            目标账户：{resetModal.account?.name}（{resetModal.account?.username || resetModal.account?.student_no || "-"}）
+                            目标账户：{resetModal.account?.name}（{resetModal.account?.username || "-"}）
                         </div>
                         <div className="space-y-2">
                             <input
@@ -388,7 +388,7 @@ function AdminAccountsApp() {
                             />
                             <PasswordStrengthBar
                                 password={resetModal.password}
-                                username={resetModal.account?.username || resetModal.account?.student_no || ""}
+                                username={resetModal.account?.username || ""}
                             />
                         </div>
                         <div className="mt-3 flex items-center justify-end gap-2">

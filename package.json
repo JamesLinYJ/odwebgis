@@ -1,0 +1,12 @@
+{
+  "name": "odwebgis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OD WebGIS frontend build tooling",
+  "scripts": {
+    "build:tailwind": "tailwindcss -c tailwind.config.js -i static/css/tailwind.input.css -o static/css/tailwind.generated.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}
