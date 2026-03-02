@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-.venv}"
 NPM_BIN="${NPM_BIN:-npm}"
+NODE_BIN="${NODE_BIN:-node}"
 AUTO_INSTALL_NODE="${AUTO_INSTALL_NODE:-1}"
 PKG_TIMEOUT_SECONDS="${PKG_TIMEOUT_SECONDS:-240}"
 
@@ -120,11 +121,14 @@ python -m pip install --upgrade pip setuptools wheel
 python -m pip install -r requirements.txt
 
 install_node_if_missing() {
-  if command -v "$NPM_BIN" >/dev/null 2>&1; then
+  if command -v "$NPM_BIN" >/dev/null 2>&1 && command -v "$NODE_BIN" >/dev/null 2>&1; then
     return 0
   fi
+  if command -v "$NPM_BIN" >/dev/null 2>&1 && ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+    echo "[WARN] npm is available but node is missing in current Linux environment."
+  fi
   if [[ "$AUTO_INSTALL_NODE" != "1" ]]; then
-    echo "[WARN] npm not found. Skipping Node.js auto-install (AUTO_INSTALL_NODE=0)."
+    echo "[WARN] Node.js toolchain unavailable. Skipping Node.js auto-install (AUTO_INSTALL_NODE=0)."
     echo "[WARN] Tailwind will use standalone binary."
     return 1
   fi
@@ -143,8 +147,8 @@ install_node_if_missing() {
     echo "[WARN] Tailwind will use standalone binary."
     return 1
   fi
-  if ! command -v "$NPM_BIN" >/dev/null 2>&1; then
-    echo "[WARN] Node.js/npm install command finished but npm is still unavailable."
+  if ! command -v "$NPM_BIN" >/dev/null 2>&1 || ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+    echo "[WARN] Node.js/npm install command finished but node or npm is still unavailable."
     echo "[WARN] Tailwind will use standalone binary."
     return 1
   fi
@@ -152,7 +156,7 @@ install_node_if_missing() {
 
 install_node_if_missing || true
 
-if command -v "$NPM_BIN" >/dev/null 2>&1 && [[ -f package.json ]]; then
+if command -v "$NPM_BIN" >/dev/null 2>&1 && command -v "$NODE_BIN" >/dev/null 2>&1 && [[ -f package.json ]]; then
   echo "[INFO] Installing Node dependencies ..."
   if [[ -f package-lock.json ]]; then
     if ! "$NPM_BIN" ci --no-audit --no-fund; then

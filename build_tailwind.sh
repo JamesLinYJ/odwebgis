@@ -9,6 +9,7 @@ INPUT_FILE="${TAILWIND_INPUT_FILE:-static/css/tailwind.input.css}"
 OUTPUT_FILE="${TAILWIND_OUTPUT_FILE:-static/css/tailwind.generated.css}"
 CONFIG_FILE="${TAILWIND_CONFIG_FILE:-tailwind.config.js}"
 NPM_BIN="${NPM_BIN:-npm}"
+NODE_BIN="${NODE_BIN:-node}"
 TAILWIND_USE_STANDALONE="${TAILWIND_USE_STANDALONE:-0}"
 NPM_TIMEOUT_SECONDS="${NPM_TIMEOUT_SECONDS:-180}"
 
@@ -28,8 +29,13 @@ download_file() {
 }
 
 resolve_tailwind_bin() {
+  local npm_node_ok=0
+  if command -v "$NPM_BIN" >/dev/null 2>&1 && command -v "$NODE_BIN" >/dev/null 2>&1; then
+    npm_node_ok=1
+  fi
+
   if [[ "$TAILWIND_USE_STANDALONE" != "1" ]]; then
-    if command -v "$NPM_BIN" >/dev/null 2>&1 && [[ -f "$ROOT_DIR/package.json" ]]; then
+    if [[ "$npm_node_ok" -eq 1 ]] && [[ -f "$ROOT_DIR/package.json" ]]; then
       if [[ ! -x "$ROOT_DIR/node_modules/.bin/tailwindcss" ]]; then
         echo "[INFO] Installing Node dependencies for Tailwind build ..." >&2
         if [[ -f "$ROOT_DIR/package-lock.json" ]]; then
@@ -58,6 +64,8 @@ resolve_tailwind_bin() {
         echo "$ROOT_DIR/node_modules/.bin/tailwindcss"
         return 0
       fi
+    elif [[ -f "$ROOT_DIR/package.json" ]] && command -v "$NPM_BIN" >/dev/null 2>&1 && ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+      echo "[WARN] npm found but node missing, fallback to standalone Tailwind binary." >&2
     fi
   fi
 

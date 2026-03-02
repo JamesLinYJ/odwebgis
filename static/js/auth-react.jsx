@@ -30,7 +30,7 @@ function PasswordStrengthBar({ password, username = "" }) {
 function AuthApp() {
     const [tab, setTab] = useState("login");
     const [loading, setLoading] = useState(false);
-    const [loginForm, setLoginForm] = useState({ account: "", password: "" });
+    const [loginForm, setLoginForm] = useState({ username: "", password: "" });
     const [guestForm, setGuestForm] = useState({ name: "" });
     const [registerForm, setRegisterForm] = useState({
         name: "",
@@ -53,20 +53,20 @@ function AuthApp() {
 
     async function submitLogin(e) {
         e.preventDefault();
-        if (!loginForm.account.trim() || !loginForm.password) {
+        if (!loginForm.username.trim() || !loginForm.password) {
             api.notify("请输入用户名和密码", true);
             return;
         }
         setLoading(true);
         try {
             const res = await api.postJsonSecure("/api/auth/login", {
-                account: loginForm.account.trim(),
+                username: loginForm.username.trim(),
                 password: loginForm.password,
             });
             api.notify("登录成功");
             window.location.href = res.redirect || "/";
         } catch (err) {
-            api.notify(err.message || "登录失败", true);
+            api.notify(err.message || "登录失败，请检查账号或密码", true);
         } finally {
             setLoading(false);
         }
@@ -83,7 +83,7 @@ function AuthApp() {
             return;
         }
         if (registerForm.password !== registerForm.password_confirm) {
-            api.notify("两次密码输入不一致", true);
+            api.notify("两次输入的密码不一致", true);
             return;
         }
 
@@ -100,10 +100,10 @@ function AuthApp() {
                 username: registerForm.username.trim(),
                 password: registerForm.password,
             });
-            api.notify("注册成功");
+            api.notify("注册成功，正在进入平台");
             window.location.href = "/";
         } catch (err) {
-            api.notify(err.message || "注册失败", true);
+            api.notify(err.message || "注册失败，请稍后重试", true);
         } finally {
             setLoading(false);
         }
@@ -123,61 +123,57 @@ function AuthApp() {
             api.notify("已进入访客模式");
             window.location.href = res.redirect || "/";
         } catch (err) {
-            api.notify(err.message || "访客登录失败", true);
+            api.notify(err.message || "访客进入失败，请稍后重试", true);
         } finally {
             setLoading(false);
         }
     }
 
     return (
-        <div className="mx-auto flex min-h-screen max-w-[440px] items-center justify-center p-3 sm:p-5 ios-fade-up">
-            <div className="ios-card w-full overflow-hidden rounded-3xl border border-blue-100 bg-white/95 shadow-soft">
-                <section className="p-5 sm:p-8">
-                    <div className="mb-1 text-2xl font-black text-brand-700">账户入口</div>
-                    <div className="mb-5 text-xs font-semibold text-slate-500">请登录或注册</div>
+        <div className="mx-auto flex min-h-screen max-w-[460px] items-center justify-center p-3 sm:p-6 ios-fade-up">
+            <div className="ios-card w-full overflow-hidden rounded-[1.4rem] border border-blue-100 bg-white/80 shadow-soft sm:rounded-[2rem]">
+                <section className="p-4 sm:p-10">
+                    <div className="mb-2 text-3xl font-black tracking-tight text-brand-700">账户入口</div>
+                    <div className="mb-6 text-sm font-semibold text-slate-500">登录、注册或访客进入</div>
 
-                    <div className="ios-tab-switch mb-4 grid grid-cols-3 rounded-xl bg-blue-50 p-1">
+                    <div className="ios-tab-switch mb-6 grid grid-cols-3 gap-1 rounded-2xl bg-blue-50/50 p-1.5">
                         <button
                             type="button"
                             onClick={() => setTab("login")}
-                            className={`rounded-lg px-3 py-2 text-sm font-bold ${tab === "login" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500"
-                                }`}
+                            className={`rounded-xl px-3 py-2 text-xs font-bold transition-all sm:px-4 sm:py-2.5 sm:text-sm ${tab === "login" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
                         >
                             登录
                         </button>
                         <button
                             type="button"
                             onClick={() => setTab("register")}
-                            className={`rounded-lg px-3 py-2 text-sm font-bold ${tab === "register" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500"
-                                }`}
+                            className={`rounded-xl px-3 py-2 text-xs font-bold transition-all sm:px-4 sm:py-2.5 sm:text-sm ${tab === "register" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
                         >
                             注册
                         </button>
                         <button
                             type="button"
                             onClick={() => setTab("guest")}
-                            className={`rounded-lg px-3 py-2 text-sm font-bold ${tab === "guest" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500"
-                                }`}
+                            className={`rounded-xl px-3 py-2 text-xs font-bold transition-all sm:px-4 sm:py-2.5 sm:text-sm ${tab === "guest" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
                         >
                             访客
                         </button>
                     </div>
 
-                    <div className="grid overflow-hidden min-h-[340px]">
+                    <div className="grid min-h-[300px] overflow-hidden sm:min-h-[340px]">
                         <form
                             onSubmit={submitLogin}
-                            className={`ios-tab-pane ${tab === "login" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-left pointer-events-none"
-                                }`}
-                            style={{ position: 'relative', gridArea: '1 / 1' }}
+                            className={`ios-tab-pane ${tab === "login" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-left pointer-events-none"}`}
+                            style={{ position: "relative", gridArea: "1 / 1" }}
                         >
                             <div className="space-y-3">
                                 <div>
                                     <label className="mb-1 block text-xs font-bold text-slate-500">用户名</label>
                                     <input
                                         required
-                                        value={loginForm.account}
-                                        onChange={(e) => setLoginForm((prev) => ({ ...prev, account: e.target.value }))}
-                                        className="w-full rounded-xl border border-blue-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+                                        value={loginForm.username}
+                                        onChange={(e) => setLoginForm((prev) => ({ ...prev, username: e.target.value }))}
+                                        className="modern-input w-full rounded-xl px-4 py-3 text-sm"
                                         placeholder="请输入用户名"
                                     />
                                 </div>
@@ -188,26 +184,23 @@ function AuthApp() {
                                         type="password"
                                         value={loginForm.password}
                                         onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
-                                        className="w-full rounded-xl border border-blue-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+                                        className="modern-input w-full rounded-xl px-4 py-3 text-sm"
                                         placeholder="请输入密码"
                                     />
                                 </div>
                                 <button
                                     disabled={loading}
-                                    className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+                                    className="btn-primary mt-2 w-full rounded-xl px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
                                 >
-                                    {loading ? "提交中..." : "登录"}
+                                    {loading ? "登录中..." : "登录"}
                                 </button>
                             </div>
                         </form>
 
                         <form
                             onSubmit={submitRegister}
-                            className={`ios-tab-pane ${tab === "register"
-                                ? "ios-tab-pane-active"
-                                : "ios-tab-pane-hidden-right pointer-events-none"
-                                }`}
-                            style={{ position: 'relative', gridArea: '1 / 1' }}
+                            className={`ios-tab-pane ${tab === "register" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-right pointer-events-none"}`}
+                            style={{ position: "relative", gridArea: "1 / 1" }}
                         >
                             <div className="space-y-3">
                                 <div>
@@ -216,7 +209,7 @@ function AuthApp() {
                                         required
                                         value={registerForm.name}
                                         onChange={(e) => setRegisterForm((prev) => ({ ...prev, name: e.target.value }))}
-                                        className="w-full rounded-xl border border-blue-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+                                        className="modern-input w-full rounded-xl px-4 py-3 text-sm"
                                         placeholder="请输入姓名"
                                     />
                                 </div>
@@ -226,8 +219,8 @@ function AuthApp() {
                                         required
                                         value={registerForm.username}
                                         onChange={(e) => setRegisterForm((prev) => ({ ...prev, username: e.target.value }))}
-                                        className="w-full rounded-xl border border-blue-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
-                                        placeholder="3-24 位，支持英文/数字/下划线"
+                                        className="modern-input w-full rounded-xl px-4 py-3 text-sm"
+                                        placeholder="3-24 位，支持字母/数字/下划线"
                                     />
                                 </div>
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -238,8 +231,8 @@ function AuthApp() {
                                             type="password"
                                             value={registerForm.password}
                                             onChange={(e) => setRegisterForm((prev) => ({ ...prev, password: e.target.value }))}
-                                            className="w-full rounded-xl border border-blue-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
-                                            placeholder="8-64 位，支持特殊符号"
+                                            className="modern-input w-full rounded-xl px-4 py-3 text-sm"
+                                            placeholder="6-64 位，支持特殊字符"
                                         />
                                     </div>
                                     <div>
@@ -248,29 +241,26 @@ function AuthApp() {
                                             required
                                             type="password"
                                             value={registerForm.password_confirm}
-                                            onChange={(e) =>
-                                                setRegisterForm((prev) => ({ ...prev, password_confirm: e.target.value }))
-                                            }
-                                            className="w-full rounded-xl border border-blue-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
-                                            placeholder="再次输入密码"
+                                            onChange={(e) => setRegisterForm((prev) => ({ ...prev, password_confirm: e.target.value }))}
+                                            className="modern-input w-full rounded-xl px-4 py-3 text-sm"
+                                            placeholder="请再次输入密码"
                                         />
                                     </div>
                                 </div>
                                 <PasswordStrengthBar password={registerForm.password} username={registerForm.username} />
                                 <button
                                     disabled={loading}
-                                    className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+                                    className="btn-primary mt-2 w-full rounded-xl px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
                                 >
-                                    {loading ? "提交中..." : "注册"}
+                                    {loading ? "注册中..." : "注册"}
                                 </button>
                             </div>
                         </form>
 
                         <form
                             onSubmit={submitGuest}
-                            className={`ios-tab-pane ${tab === "guest" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-right pointer-events-none"
-                                }`}
-                            style={{ position: 'relative', gridArea: '1 / 1' }}
+                            className={`ios-tab-pane ${tab === "guest" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-right pointer-events-none"}`}
+                            style={{ position: "relative", gridArea: "1 / 1" }}
                         >
                             <div className="space-y-3">
                                 <div>
@@ -280,18 +270,18 @@ function AuthApp() {
                                         maxLength={32}
                                         value={guestForm.name}
                                         onChange={(e) => setGuestForm((prev) => ({ ...prev, name: e.target.value }))}
-                                        className="w-full rounded-xl border border-blue-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+                                        className="modern-input w-full rounded-xl px-4 py-3 text-sm"
                                         placeholder="输入姓名后进入访客模式"
                                     />
                                 </div>
                                 <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-semibold text-slate-600">
-                                    访客可直接进入学生端录入线路，数据会保存到访客账户。
+                                    访客可直接进入学生页面并录入线路，数据将以访客身份保存。
                                 </div>
                                 <button
                                     disabled={loading}
-                                    className="w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+                                    className="btn-primary mt-2 w-full rounded-xl px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
                                 >
-                                    {loading ? "提交中..." : "进入访客模式"}
+                                    {loading ? "进入中..." : "进入访客模式"}
                                 </button>
                             </div>
                         </form>

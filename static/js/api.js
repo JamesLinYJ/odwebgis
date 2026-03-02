@@ -161,7 +161,7 @@
 
     function validatePasswordInput(password, username = "") {
         const value = String(password || "");
-        if (value.length < 8) return "密码至少 8 位";
+        if (value.length < 6) return "密码至少 6 位";
         if (value.length > 64) return "密码长度不能超过 64 位";
         if (/\s/.test(value)) return "密码不能包含空格";
         if (!/^[\x21-\x7E]+$/.test(value)) {
@@ -181,22 +181,69 @@
         const hasDigit = /\d/.test(value);
         const hasSymbol = /[^A-Za-z0-9]/.test(value);
 
+        // Count how many character categories are present
+        const categories = [hasLower, hasUpper, hasDigit, hasSymbol].filter(Boolean).length;
+
+        // Detect common weak patterns
+        const lower = value.toLowerCase();
+        const commonPatterns = [
+            "123456", "654321", "111111", "000000", "888888",
+            "abcdef", "qwerty", "password", "abc123", "admin",
+            "letmein", "welcome", "monkey", "dragon", "master",
+        ];
+        const hasCommonPattern = commonPatterns.some((p) => lower.includes(p));
+
+        // Detect too many repeated characters (e.g. "aaaaaa")
+        const maxRepeat = value.split("").reduce((max, ch, i, arr) => {
+            if (i === 0) return 1;
+            const run = arr[i] === arr[i - 1] ? (max === i ? max + 1 : 2) : 1;
+            return Math.max(max, run);
+        }, 0);
+        const tooManyRepeats = maxRepeat >= Math.max(3, Math.ceil(value.length * 0.5));
+
+        // Detect sequential runs (abc, 123, cba, 321)
+        let maxSeq = 1;
+        let curSeq = 1;
+        for (let i = 1; i < value.length; i++) {
+            const diff = value.charCodeAt(i) - value.charCodeAt(i - 1);
+            if (diff === 1 || diff === -1) {
+                curSeq++;
+                maxSeq = Math.max(maxSeq, curSeq);
+            } else {
+                curSeq = 1;
+            }
+        }
+        const tooSequential = maxSeq >= Math.max(4, Math.ceil(value.length * 0.6));
+
+        // Build score with weighted factors
         let score = 0;
-        if (value.length >= 8) score += 1;
-        if (value.length >= 12) score += 1;
-        if (hasLower && hasUpper) score += 1;
-        if (hasDigit) score += 1;
-        if (hasSymbol) score += 1;
+
+        // Length contribution (0-3 points)
+        if (value.length >= 6) score += 1;
+        if (value.length >= 10) score += 1;
+        if (value.length >= 14) score += 1;
+
+        // Category diversity (0-3 points)
+        if (categories >= 2) score += 1;
+        if (categories >= 3) score += 1;
+        if (categories >= 4) score += 1;
+
+        // Penalties
+        if (hasCommonPattern) score = Math.max(0, score - 2);
+        if (tooManyRepeats) score = Math.max(0, score - 2);
+        if (tooSequential) score = Math.max(0, score - 1);
+        if (categories <= 1 && value.length < 10) score = Math.min(score, 1);
         if (invalid && value.length > 0) score = Math.min(score, 1);
 
+        // Determine level
         let level = "weak";
         let label = "弱";
         if (value.length === 0) {
             label = "未输入";
-        } else if (score >= 4) {
+        } else if (score >= 5) {
             level = "strong";
             label = "强";
-        } else if (score >= 2) {
+        } else if (score >= 3) {
             level = "medium";
             label = "中";
         }
@@ -209,6 +256,7 @@
             hasUpper,
             hasDigit,
             hasSymbol,
+            categories,
             length: value.length,
             valid: !invalid,
             error: invalid ? validatePasswordInput(value, username) : "",

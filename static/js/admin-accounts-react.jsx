@@ -106,11 +106,11 @@ function AdminAccountsApp() {
     async function createAccount(e) {
         e.preventDefault();
         if (!form.name.trim()) {
-            api.notify("姓名不能为空", true);
+            api.notify("请输入姓名", true);
             return;
         }
         if (!form.username.trim()) {
-            api.notify("用户名不能为空", true);
+            api.notify("请输入用户名", true);
             return;
         }
         const passwordErr = api.validatePasswordInput(form.password, form.username);
@@ -131,7 +131,7 @@ function AdminAccountsApp() {
             setForm({ name: "", username: "", password: "", user_type: "student" });
             await loadAccounts();
         } catch (err) {
-            api.notify(err.message || "创建账户失败", true);
+            api.notify(err.message || "创建失败，请稍后重试", true);
         } finally {
             setFormSubmitting(false);
         }
@@ -139,14 +139,14 @@ function AdminAccountsApp() {
 
     async function removeAccount(acc) {
         const target = `${acc.name}（${acc.username || "-"}）`;
-        if (!window.confirm(`确认删除账户 ${target}？此操作会删除该账户的全部路线。`)) return;
+        if (!window.confirm(`确认删除账户 ${target}？该账户的所有线路也会一并删除。`)) return;
         setDeleteBusyId(acc.id);
         try {
             await api.del(`/api/admin/accounts/${acc.id}`);
             api.notify("账户已删除");
             await loadAccounts();
         } catch (err) {
-            api.notify(err.message || "删除失败", true);
+            api.notify(err.message || "删除失败，请稍后重试", true);
         } finally {
             setDeleteBusyId(null);
         }
@@ -176,7 +176,7 @@ function AdminAccountsApp() {
         e.preventDefault();
         if (!resetModal.account) return;
         if (resetModal.password !== resetModal.confirm) {
-            api.notify("两次新密码输入不一致", true);
+            api.notify("两次输入的新密码不一致", true);
             return;
         }
         const username = resetModal.account.username || "";
@@ -191,11 +191,11 @@ function AdminAccountsApp() {
             await api.postJsonSecure(`/api/admin/accounts/${resetModal.account.id}/reset-password`, {
                 new_password: resetModal.password,
             });
-            api.notify("密码已重置，目标账户下次登录需修改密码");
+            api.notify("密码已重置，目标账户下次登录将被提示修改密码");
             closeResetModal();
             await loadAccounts();
         } catch (err) {
-            api.notify(err.message || "重置失败", true);
+            api.notify(err.message || "重置失败，请稍后重试", true);
             setResetModal((prev) => ({ ...prev, saving: false }));
         }
     }
@@ -210,32 +210,32 @@ function AdminAccountsApp() {
     }
 
     return (
-        <div className="mx-auto max-w-[1200px] p-3 sm:p-4 ios-fade-up">
-            <header className="ios-card mb-3 rounded-2xl border border-blue-100 bg-white/95 px-4 py-3 shadow-soft">
+        <div className="mx-auto max-w-[1400px] p-2.5 sm:p-5 ios-fade-up">
+            <header className="ios-card mb-5 rounded-[1.4rem] border border-blue-100 bg-white/80 px-4 py-4 shadow-soft sm:rounded-[2rem] sm:px-6 sm:py-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <div className="text-2xl font-black text-admin-600">账户管理</div>
-                        <div className="text-xs font-semibold text-slate-500">管理全部账户</div>
+                        <div className="text-xs font-semibold text-slate-500">管理学生与管理员账户</div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
                         <button
                             type="button"
                             onClick={() => (window.location.href = "/admin")}
-                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600"
+                            className="rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50"
                         >
                             返回教师后台
                         </button>
                         <button
                             type="button"
                             onClick={() => (window.location.href = "/account")}
-                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600"
+                            className="rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50"
                         >
-                            我的账户中心
+                            我的账户
                         </button>
                         <button
                             type="button"
                             onClick={logout}
-                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600"
+                            className="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-bold text-rose-600 transition-all hover:bg-rose-50"
                         >
                             退出登录
                         </button>
@@ -243,21 +243,21 @@ function AdminAccountsApp() {
                 </div>
             </header>
 
-            <main className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1.15fr]">
-                <section className="ios-card rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft">
-                    <div className="mb-2 text-sm font-black text-admin-600">新增账户</div>
-                    <form onSubmit={createAccount} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <main className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1.5fr]">
+                <section className="ios-card h-fit rounded-[1.4rem] border border-blue-100 bg-white/80 p-4 shadow-soft sm:rounded-[2rem] sm:p-6">
+                    <div className="mb-4 text-lg font-black text-admin-600">新增账户</div>
+                    <form onSubmit={createAccount} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <input
                             required
                             value={form.name}
                             onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                            className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
+                            className="modern-input rounded-xl px-4 py-3 text-sm"
                             placeholder="姓名"
                         />
                         <select
                             value={form.user_type}
                             onChange={(e) => setForm((prev) => ({ ...prev, user_type: e.target.value }))}
-                            className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
+                            className="modern-input rounded-xl px-4 py-3 text-sm"
                         >
                             <option value="student">普通账户（学生）</option>
                             <option value="admin">管理员账户</option>
@@ -266,7 +266,7 @@ function AdminAccountsApp() {
                             required
                             value={form.username}
                             onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
-                            className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
+                            className="modern-input rounded-xl px-4 py-3 text-sm sm:col-span-2"
                             placeholder="用户名"
                         />
                         <input
@@ -274,40 +274,40 @@ function AdminAccountsApp() {
                             type="password"
                             value={form.password}
                             onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
-                            className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
-                            placeholder="8-64 位，支持特殊符号"
+                            className="modern-input rounded-xl px-4 py-3 text-sm sm:col-span-2"
+                            placeholder="初始密码（6-64 位，支持特殊字符）"
                         />
-                        <div className="sm:col-span-2">
+                        <div className="px-1 sm:col-span-2">
                             <PasswordStrengthBar password={form.password} username={form.username} />
                         </div>
                         <button
                             disabled={formSubmitting}
-                            className="sm:col-span-2 rounded-lg bg-admin-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60"
+                            className="btn-primary mt-2 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-60 sm:col-span-2"
                         >
                             {formSubmitting ? "创建中..." : "创建账户"}
                         </button>
                     </form>
                 </section>
 
-                <section className="ios-card rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-sm font-black text-admin-600">账户列表</div>
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-admin-600">
+                <section className="ios-card flex h-auto flex-col rounded-[1.4rem] border border-blue-100 bg-white/80 p-4 shadow-soft sm:rounded-[2rem] sm:p-6 lg:h-[min(85vh,900px)]">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <div className="text-lg font-black text-admin-600">账户列表</div>
+                        <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-admin-600">
                             共 {api.fmtNumber(visibleAccounts.length)} 个
                         </span>
                     </div>
 
-                    <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <input
                             value={filter.q}
                             onChange={(e) => setFilter((prev) => ({ ...prev, q: e.target.value }))}
-                            className="sm:col-span-2 rounded-lg border border-blue-200 px-3 py-2 text-sm"
-                            placeholder="搜索姓名 / 用户名 / 状态"
+                            className="modern-input rounded-xl px-4 py-2.5 text-sm sm:col-span-2"
+                            placeholder="搜索姓名、用户名或状态"
                         />
                         <select
                             value={filter.user_type}
                             onChange={(e) => setFilter((prev) => ({ ...prev, user_type: e.target.value }))}
-                            className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
+                            className="modern-input rounded-xl px-4 py-2.5 text-sm"
                         >
                             <option value="all">角色：全部</option>
                             <option value="student">学生</option>
@@ -315,13 +315,13 @@ function AdminAccountsApp() {
                         </select>
                     </div>
 
-                    <div className="max-h-[62vh] space-y-2 overflow-auto pr-1">
+                    <div className="flex-1 space-y-2.5 overflow-auto pr-1 sm:pr-2">
                         {visibleAccounts.map((acc) => (
-                            <div key={acc.id} className="rounded-xl border border-blue-100 bg-blue-50/30 p-3">
+                            <div key={acc.id} className="rounded-2xl border border-blue-100 bg-white/60 p-3 shadow-sm transition-all hover:border-admin-200 hover:bg-white hover:shadow-md sm:p-4">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
-                                        <div className="truncate text-sm font-bold text-slate-700">{acc.name}</div>
-                                        <div className="truncate text-xs font-semibold text-slate-500">
+                                        <div className="truncate text-base font-bold text-slate-800">{acc.name}</div>
+                                        <div className="mt-1 truncate text-xs font-semibold text-slate-500">
                                             用户名：{acc.username || "-"} | {acc.user_type === "admin" ? "管理员" : "学生"}
                                         </div>
                                         <div className="truncate text-xs font-semibold text-slate-500">
@@ -330,11 +330,11 @@ function AdminAccountsApp() {
                                     </div>
                                     <div className="text-right text-[11px] font-bold text-slate-400">ID {acc.id}</div>
                                 </div>
-                                <div className="mt-2 flex items-center justify-end gap-2">
+                                <div className="mt-3 flex flex-wrap items-center justify-end gap-2 sm:mt-4 sm:gap-3">
                                     <button
                                         type="button"
                                         onClick={() => openResetModal(acc)}
-                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
+                                        className="rounded-xl border border-admin-200 bg-white px-4 py-2 text-xs font-bold text-admin-600 transition-all hover:bg-admin-50"
                                     >
                                         重置密码
                                     </button>
@@ -342,7 +342,7 @@ function AdminAccountsApp() {
                                         type="button"
                                         onClick={() => removeAccount(acc)}
                                         disabled={deleteBusyId === acc.id}
-                                        className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 disabled:opacity-60"
+                                        className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-bold text-rose-600 transition-all hover:bg-rose-50 disabled:opacity-60"
                                     >
                                         {deleteBusyId === acc.id ? "删除中..." : "删除账户"}
                                     </button>
@@ -359,48 +359,50 @@ function AdminAccountsApp() {
             </main>
 
             {resetModal.open && (
-                <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-slate-900/30 p-3 backdrop-blur-[2px]">
+                <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-md">
                     <form
                         onSubmit={submitResetPassword}
-                        className="ios-card w-[min(92vw,420px)] rounded-2xl border border-blue-100 bg-white p-4 shadow-soft"
+                        className="ios-card w-[min(92vw,440px)] rounded-[2rem] border border-blue-100 bg-white/90 p-6 shadow-soft"
                     >
-                        <div className="mb-2 text-lg font-black text-admin-600">重置密码</div>
-                        <div className="mb-3 text-xs font-semibold text-slate-500">
+                        <div className="mb-2 text-xl font-black text-admin-600">重置密码</div>
+                        <div className="mb-4 text-sm font-semibold text-slate-500">
                             目标账户：{resetModal.account?.name}（{resetModal.account?.username || "-"}）
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-4">
                             <input
                                 required
                                 type="password"
                                 value={resetModal.password}
                                 onChange={(e) => setResetModal((prev) => ({ ...prev, password: e.target.value }))}
-                                className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
-                                placeholder="8-64 位，支持特殊符号"
+                                className="modern-input w-full rounded-xl px-4 py-3 text-sm"
+                                placeholder="新密码（6-64 位，支持特殊字符）"
                             />
                             <input
                                 required
                                 type="password"
                                 value={resetModal.confirm}
                                 onChange={(e) => setResetModal((prev) => ({ ...prev, confirm: e.target.value }))}
-                                className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
-                                placeholder="确认新密码"
+                                className="modern-input w-full rounded-xl px-4 py-3 text-sm"
+                                placeholder="再次输入新密码"
                             />
-                            <PasswordStrengthBar
-                                password={resetModal.password}
-                                username={resetModal.account?.username || ""}
-                            />
+                            <div className="px-1">
+                                <PasswordStrengthBar
+                                    password={resetModal.password}
+                                    username={resetModal.account?.username || ""}
+                                />
+                            </div>
                         </div>
-                        <div className="mt-3 flex items-center justify-end gap-2">
+                        <div className="mt-5 flex items-center justify-end gap-3">
                             <button
                                 type="button"
                                 onClick={closeResetModal}
-                                className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600"
+                                className="rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50"
                             >
                                 取消
                             </button>
                             <button
                                 disabled={resetModal.saving}
-                                className="rounded-lg bg-admin-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60"
+                                className="btn-primary rounded-xl px-4 py-2.5 text-sm font-bold disabled:opacity-60"
                             >
                                 {resetModal.saving ? "提交中..." : "确认重置"}
                             </button>

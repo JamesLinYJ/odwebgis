@@ -62,7 +62,7 @@ function AccountApp() {
             return;
         }
         if (form.new_password !== form.confirm_password) {
-            api.notify("两次新密码输入不一致", true);
+            api.notify("两次输入的新密码不一致", true);
             return;
         }
 
@@ -78,7 +78,7 @@ function AccountApp() {
                 old_password: form.old_password,
                 new_password: form.new_password,
             });
-            api.notify("密码修改成功");
+            api.notify("密码已更新");
             setForm({
                 old_password: "",
                 new_password: "",
@@ -86,7 +86,7 @@ function AccountApp() {
             });
             await loadMe();
         } catch (err) {
-            api.notify(err.message || "密码修改失败", true);
+            api.notify(err.message || "修改失败，请稍后重试", true);
         } finally {
             setSaving(false);
         }
@@ -107,25 +107,25 @@ function AccountApp() {
     }
 
     return (
-        <div className="mx-auto max-w-[860px] p-3 sm:p-4 ios-fade-up">
-            <header className="ios-card mb-3 rounded-2xl border border-blue-100 bg-white/95 px-4 py-3 shadow-soft">
+        <div className="mx-auto max-w-[860px] p-2.5 sm:p-4 ios-fade-up">
+            <header className="ios-card mb-4 rounded-[1.4rem] border border-blue-100 bg-white/80 px-4 py-4 shadow-soft sm:rounded-[2rem] sm:px-6 sm:py-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                         <div className="text-2xl font-black text-brand-700">账户中心</div>
-                        <div className="text-xs font-semibold text-slate-500">账户信息与安全设置</div>
+                        <div className="text-xs font-semibold text-slate-500">查看账号信息并管理密码</div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                         <button
                             type="button"
                             onClick={backToMain}
-                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700"
+                            className="rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm font-bold text-brand-700 transition-all hover:bg-blue-50"
                         >
-                            返回主页面
+                            返回主页
                         </button>
                         <button
                             type="button"
                             onClick={logout}
-                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700"
+                            className="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-bold text-rose-600 transition-all hover:bg-rose-50"
                         >
                             退出登录
                         </button>
@@ -133,61 +133,68 @@ function AccountApp() {
                 </div>
             </header>
 
-            <main className="ios-card rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft">
+            <main className="ios-card rounded-[1.4rem] border border-blue-100 bg-white/80 p-4 shadow-soft sm:rounded-[2rem] sm:p-6">
                 {loading && <div className="text-sm font-semibold text-slate-500">正在加载账户信息...</div>}
                 {!loading && user && (
                     <div className="space-y-4">
-                        <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
-                            <div className="text-sm font-black text-brand-700">{user.name}</div>
+                        <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4 sm:p-5">
+                            <div className="text-lg font-black text-brand-700">{user.name}</div>
+                            {!user.is_guest && (
+                                <div className="mt-1 text-xs font-semibold text-slate-600">
+                                    用户名：{user.username || "-"}
+                                </div>
+                            )}
                             <div className="mt-1 text-xs font-semibold text-slate-600">
-                                用户名：{user.username || "-"}
-                            </div>
-                            <div className="mt-1 text-xs font-semibold text-slate-600">
-                                角色：{user.user_type === "admin" ? "管理员" : "学生"}
+                                角色：{user.is_guest ? "访客" : user.user_type === "admin" ? "管理员" : "学生"}
                             </div>
                             {user.must_change_password && (
                                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">
-                                    当前账户需要先修改密码
+                                    当前账户需要先修改密码后继续使用。
                                 </div>
                             )}
                             {user.is_system_admin && (
                                 <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-bold text-sky-700">
-                                    系统后台账号密码由部署环境统一管理
+                                    系统后台账户密码由部署环境统一管理。
+                                </div>
+                            )}
+                            {user.is_guest && (
+                                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold text-slate-600">
+                                    访客账号无需设置密码，退出后可再次以访客身份进入。
                                 </div>
                             )}
                         </div>
 
-                        {!user.is_system_admin && (
-                            <form onSubmit={submitPassword} className="space-y-2 rounded-xl border border-blue-100 bg-white p-3">
-                                <div className="text-sm font-black text-brand-700">修改密码</div>
+                        {!user.is_system_admin && !user.is_guest && (
+                            <form onSubmit={submitPassword} className="space-y-4 rounded-2xl border border-blue-100 bg-white/80 p-4 shadow-sm sm:p-5">
+                                <div className="mb-2 text-lg font-black text-brand-700">修改密码</div>
                                 <input
                                     required
                                     type="password"
                                     value={form.old_password}
                                     onChange={(e) => setForm((prev) => ({ ...prev, old_password: e.target.value }))}
-                                    className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
-                                    placeholder="旧密码"
+                                    className="modern-input w-full rounded-xl px-4 py-3 text-sm"
+                                    placeholder="当前密码"
                                 />
                                 <input
                                     required
                                     type="password"
                                     value={form.new_password}
                                     onChange={(e) => setForm((prev) => ({ ...prev, new_password: e.target.value }))}
-                                    className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
-                                    placeholder="8-64 位，支持特殊符号"
+                                    className="modern-input w-full rounded-xl px-4 py-3 text-sm"
+                                    placeholder="新密码（6-64 位，支持特殊字符）"
                                 />
                                 <input
                                     required
                                     type="password"
                                     value={form.confirm_password}
                                     onChange={(e) => setForm((prev) => ({ ...prev, confirm_password: e.target.value }))}
-                                    className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
-                                    placeholder="确认新密码"
+                                    className="modern-input w-full rounded-xl px-4 py-3 text-sm"
+                                    placeholder="再次输入新密码"
                                 />
                                 <PasswordStrengthBar password={form.new_password} username={user.username || ""} />
                                 <button
                                     disabled={saving}
-                                    className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60"
+                                    className="btn-primary mt-2 w-full rounded-xl px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
                                 >
                                     {saving ? "提交中..." : "确认修改密码"}
                                 </button>

@@ -2,22 +2,45 @@
 
 function buildCurve(start, end, segments = 40) {
     const [lat1, lon1] = start;
-    const [lat2, lon2] = end;
+    const [lat2Raw, lon2Raw] = end;
+    const lat2 = Number(lat2Raw);
+    let lon2 = Number(lon2Raw);
+
+    if (![lat1, lon1, lat2, lon2].every((v) => Number.isFinite(v))) {
+        return [start, end];
+    }
+
+    // Keep arc generation stable near the 180° meridian.
+    let dxLon = lon2 - lon1;
+    if (dxLon > 180) {
+        lon2 -= 360;
+        dxLon = lon2 - lon1;
+    } else if (dxLon < -180) {
+        lon2 += 360;
+        dxLon = lon2 - lon1;
+    }
+
+    const dyLat = lat2 - lat1;
+    const dist = Math.sqrt(dxLon * dxLon + dyLat * dyLat);
+    if (dist < 1e-4) {
+        return [start, end];
+    }
+
     const midLat = (lat1 + lat2) / 2;
     const midLon = (lon1 + lon2) / 2;
-    const dx = lon2 - lon1;
-    const dy = lat2 - lat1;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const offset = Math.max(0.8, dist * 0.2);
-    const ctrlLat = midLat + (dx / (dist || 1)) * offset;
-    const ctrlLon = midLon - (dy / (dist || 1)) * offset;
+    // Adaptive curvature: close points keep near-straight lines, long routes keep a gentle arc.
+    const ratio = dist < 0.08 ? 0.04 : dist < 0.35 ? 0.08 : dist < 1.2 ? 0.12 : 0.16;
+    const offset = Math.min(6, dist * ratio);
+    const ctrlLat = midLat + (dxLon / dist) * offset;
+    const ctrlLon = midLon - (dyLat / dist) * offset;
 
     const points = [];
     for (let i = 0; i <= segments; i += 1) {
         const t = i / segments;
         const lat = (1 - t) * (1 - t) * lat1 + 2 * (1 - t) * t * ctrlLat + t * t * lat2;
         const lon = (1 - t) * (1 - t) * lon1 + 2 * (1 - t) * t * ctrlLon + t * t * lon2;
-        points.push([lat, lon]);
+        const normalizedLon = lon > 180 ? lon - 360 : lon < -180 ? lon + 360 : lon;
+        points.push([lat, normalizedLon]);
     }
     return points;
 }
@@ -26,7 +49,7 @@ function MetricCard({ title, value, hint }) {
     return (
         <div className="rounded-xl border border-blue-100 bg-white px-3 py-2 shadow-soft">
             <div className="text-xs font-bold text-slate-500">{title}</div>
-            <div className="mt-1 text-2xl font-black text-slate-800">{value}</div>
+            <div className="mt-1 text-xl font-black text-slate-800">{value}</div>
             {hint && <div className="text-xs font-semibold text-slate-500">{hint}</div>}
         </div>
     );
@@ -39,28 +62,61 @@ function routeBrief(route) {
 function attachMapDecorControls(map) {
     if (!map || !window.L) return;
 
-    const northControl = L.control({ position: "bottomright" });
-    northControl.onAdd = () => {
-        const container = L.DomUtil.create("div", "leaflet-control leaflet-control-north");
-        container.innerHTML = `
-            <div class="north-indicator" aria-label="指北针" title="北向">
-                <span class="north-indicator-arrow"></span>
-                <span class="north-indicator-text">N</span>
+    /* ─── Unified bottom-right container ─── */
+    const decorControl = L.control({ position: "bottomright" });
+    decorControl.onAdd = () => {
+        const wrap = L.DomUtil.create("div", "map-decor-controls");
+        wrap.innerHTML = `
+            <div class="map-compass" aria-label="指北针" title="指向北方">
+                <svg viewBox="0 0 40 40" width="36" height="36" class="compass-needle">
+                    <polygon points="20,4 24,20 20,17 16,20" fill="#dc2626"/>
+                    <polygon points="20,36 16,20 20,23 24,20" fill="#94a3b8"/>
+                    <circle cx="20" cy="20" r="2.5" fill="white" stroke="#475569" stroke-width="1"/>
+                </svg>
+                <span class="compass-label">N</span>
+            </div>
+            <div class="map-scale-bar">
+                <div class="scale-line"></div>
+                <div class="scale-text"></div>
             </div>
         `;
-        L.DomEvent.disableClickPropagation(container);
-        L.DomEvent.disableScrollPropagation(container);
-        return container;
+        L.DomEvent.disableClickPropagation(wrap);
+        L.DomEvent.disableScrollPropagation(wrap);
+        return wrap;
     };
-    northControl.addTo(map);
+    decorControl.addTo(map);
 
-    L.control.scale({
-        position: "bottomright",
-        metric: true,
-        imperial: false,
-        maxWidth: 140,
-        updateWhenIdle: true,
-    }).addTo(map);
+    /* ─── Auto-updating scale bar ─── */
+    const scaleText = decorControl.getContainer().querySelector(".scale-text");
+    const scaleLine = decorControl.getContainer().querySelector(".scale-line");
+    
+    function pickNiceScaleDistance(maxMeters) {
+        if (!Number.isFinite(maxMeters) || maxMeters <= 0) return 1;
+        const target = maxMeters * 0.72;
+        const exponent = Math.floor(Math.log10(target));
+        const base = Math.pow(10, exponent);
+        const fraction = target / base;
+        let niceFraction = 1;
+        if (fraction >= 5) niceFraction = 5;
+        else if (fraction >= 2) niceFraction = 2;
+        return niceFraction * base;
+    }
+
+    function updateScale() {
+        if (!scaleText || !scaleLine || !map.getSize) return;
+        const mapSize = map.getSize();
+        const maxWidthPx = 100;
+        const point1 = map.containerPointToLatLng([mapSize.x / 2 - maxWidthPx / 2, mapSize.y / 2]);
+        const point2 = map.containerPointToLatLng([mapSize.x / 2 + maxWidthPx / 2, mapSize.y / 2]);
+        const distMeters = map.distance(point1, point2);
+        const niceMeters = pickNiceScaleDistance(distMeters);
+        const ratio = Math.max(0.12, Math.min(1, niceMeters / distMeters));
+        const barWidth = Math.max(20, Math.round(maxWidthPx * ratio));
+        scaleLine.style.width = `${barWidth}px`;
+        scaleText.textContent = niceMeters >= 1000 ? `${(niceMeters / 1000).toFixed(niceMeters % 1000 === 0 ? 0 : 1)} km` : `${Math.round(niceMeters)} m`;
+    }
+    map.on("zoomend moveend resize", updateScale);
+    setTimeout(updateScale, 200);
 }
 
 function AdminApp() {
@@ -113,7 +169,6 @@ function AdminApp() {
     const [accountDeleteBusyId, setAccountDeleteBusyId] = useState(null);
     const [routeDeleteBusyId, setRouteDeleteBusyId] = useState(null);
     const [deleteUserRoutesBusy, setDeleteUserRoutesBusy] = useState(false);
-    const [detailCardScale, setDetailCardScale] = useState(1);
     const [studentContextMenu, setStudentContextMenu] = useState({
         open: false,
         x: 0,
@@ -334,7 +389,7 @@ function AdminApp() {
 
     useEffect(() => {
         const updateLayout = () => {
-            const compact = window.matchMedia("(max-width: 1536px)").matches;
+            const compact = window.matchMedia("(max-width: 1200px)").matches;
             setIsCompactScreen(compact);
             if (!layoutAutoInitRef.current) {
                 setFilterPanelOpen(!compact);
@@ -597,6 +652,19 @@ function AdminApp() {
         setRouteKeyword("");
     }
 
+    function showOnlyCurrentStudent() {
+        if (!selectedUserId) return;
+        setOnlySelectedStudent(true);
+        setSelectedRouteIds([]);
+    }
+
+    function clearCurrentStudentSelection() {
+        setSelectedUserId(null);
+        setSelectedUserIds([]);
+        setSelectedRouteIds([]);
+        setOnlySelectedStudent(false);
+    }
+
     function showAllStudentsRoutes() {
         setOnlySelectedStudent(false);
         setSelectedRouteIds([]);
@@ -782,7 +850,7 @@ function AdminApp() {
         }
         clearMapFilters();
         setTimeout(() => zoomToRoutes(allRoutes), 80);
-        api.notify("已生成全量 OD 图");
+        api.notify("已切换为全部线路展示");
     }
 
     async function toggleMapFullscreen() {
@@ -1003,7 +1071,7 @@ function AdminApp() {
     }
 
     async function resetAccountPassword(account) {
-        const input = window.prompt(`给账户 ${account.name} 设定新密码（8-64 位，支持特殊符号）`, "");
+        const input = window.prompt(`给账户 ${account.name} 设定新密码（6-64 位，支持特殊符号）`, "");
         if (input === null) return;
         const newPassword = input.trim();
         if (!newPassword) {
@@ -1077,7 +1145,7 @@ function AdminApp() {
 
     return (
         <div className="mx-auto max-w-[1900px] p-3 sm:p-4 ios-fade-up">
-            <header className="ios-card mb-3 rounded-2xl border border-blue-100 bg-white/95 px-4 py-3 shadow-soft">
+            <header className="ios-card mb-4 rounded-[1.4rem] border border-blue-100 bg-white/80 px-4 py-3 sm:rounded-[2rem] sm:px-6 sm:py-4 shadow-soft">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <div className="text-2xl font-black text-admin-600">WebGIS 教师管理后台</div>
@@ -1090,22 +1158,22 @@ function AdminApp() {
                     </div>
                     <div className="w-full xl:w-auto">
                         <div className="flex items-center gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:justify-end xl:overflow-visible xl:pb-0">
-                            <button onClick={refreshData} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">刷新数据</button>
-                            <button onClick={generateAllOdMap} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">生成全量 OD 图</button>
-                            <button onClick={() => exportOdPoster("png")} disabled={exportingPoster} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
-                            <button onClick={() => exportOdPoster("svg")} disabled={exportingPoster} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600 disabled:opacity-60">导出 SVG</button>
-                            <button onClick={() => window.location.href = "/admin/accounts"} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">账户管理</button>
-                            <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">账户中心</button>
-                            <a href="/api/export/users-csv" className="shrink-0 rounded-lg bg-admin-600 px-3 py-2 text-sm font-bold text-white">导出学生 CSV</a>
-                            <button onClick={logout} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">退出登录</button>
+                            <button onClick={refreshData} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">刷新数据</button>
+                            <button onClick={generateAllOdMap} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">展示全部线路</button>
+                            <button onClick={() => exportOdPoster("png")} disabled={exportingPoster} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
+                            <button onClick={() => exportOdPoster("svg")} disabled={exportingPoster} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 disabled:opacity-60">导出 SVG</button>
+                            <button onClick={() => window.location.href = "/admin/accounts"} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">账户管理</button>
+                            <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">账户中心</button>
+                            <a href="/api/export/users-csv" className="btn-primary shrink-0 rounded-xl bg-admin-600 px-4 py-2.5 text-sm font-bold text-white transition-all">导出学生 CSV</a>
+                            <button onClick={logout} className="shrink-0 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-bold text-rose-600 transition-all hover:bg-rose-50">退出登录</button>
                         </div>
                     </div>
                 </div>
             </header>
 
-            <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_390px]"}>
+            <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_360px]"}>
                 {!mapFullscreen && (
-                    <aside className="ios-card rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft lg:flex lg:h-[calc(100vh-220px)] lg:flex-col lg:overflow-hidden">
+                    <aside className="order-2 ios-card rounded-[1.4rem] border border-blue-100 bg-white/80 p-3 shadow-soft sm:rounded-[2rem] sm:p-5 lg:order-1 lg:flex lg:h-[calc(100vh-220px)] lg:flex-col lg:overflow-hidden">
                         <div className="mb-2 flex items-center justify-between">
                             <div className="text-lg font-black text-admin-600">学生列表</div>
                             <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-admin-600">{users.length}</span>
@@ -1118,15 +1186,15 @@ function AdminApp() {
                         <input
                             value={filters.q}
                             onChange={(e) => setFilters((p) => ({ ...p, q: e.target.value }))}
-                            className="mb-2 w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
+                            className="modern-input mb-4 w-full rounded-xl px-4 py-2.5 text-sm"
                             placeholder="搜索姓名/用户名"
                         />
 
-                        <div className="mb-3 grid grid-cols-1 gap-2">
+                        <div className="mb-4 grid grid-cols-1 gap-3">
                             <select
                                 value={filters.status}
                                 onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))}
-                                className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm"
+                                className="modern-input rounded-xl px-4 py-2.5 text-sm"
                             >
                                 <option value="">状态：全部</option>
                                 <option value="online">在线</option>
@@ -1144,9 +1212,9 @@ function AdminApp() {
                                     onClick={(e) => handleStudentClick(e, u)}
                                     onDoubleClick={() => zoomToStudent(u.id)}
                                     onContextMenu={(e) => openStudentContextMenu(e, u)}
-                                    className={`w-full rounded-xl border p-2 text-left ${Number(selectedUserId) === Number(u.id) || selectedUserIdSet.has(Number(u.id))
-                                            ? "border-admin-300 bg-blue-50"
-                                            : "border-blue-100 bg-white"
+                                    className={`w-full rounded-xl border p-3 text-left transition-all ${Number(selectedUserId) === Number(u.id) || selectedUserIdSet.has(Number(u.id))
+                                        ? "border-admin-300 bg-blue-50/80 shadow-sm"
+                                        : "border-blue-100 bg-white hover:border-admin-200 hover:bg-slate-50"
                                         }`}
                                     role="button"
                                     tabIndex={0}
@@ -1192,27 +1260,27 @@ function AdminApp() {
                     </aside>
                 )}
 
-                <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "relative h-[58vh] min-h-[360px] overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-soft sm:h-[70vh] sm:min-h-[560px] lg:h-[calc(100vh-220px)] lg:min-h-[560px] xl:min-h-[620px]"} ios-card`}>
+                <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "order-1 relative h-[56vh] min-h-[300px] overflow-hidden rounded-[1.4rem] border border-blue-100 bg-white/80 shadow-soft sm:h-[70vh] sm:min-h-[560px] sm:rounded-[2rem] lg:order-2 lg:h-[calc(100vh-220px)] lg:min-h-[560px] xl:min-h-[620px]"} ios-card`}>
                     <div ref={mapHostRef} className="h-full w-full" />
 
-                    <div className="absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
-                        <button onClick={() => mapRef.current && mapRef.current.zoomIn()} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xl font-black text-admin-600">+</button>
-                        <button onClick={() => mapRef.current && mapRef.current.zoomOut()} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xl font-black text-admin-600">-</button>
-                        <button onClick={() => setBaseMapMode((v) => (v === "vector" ? "satellite" : "vector"))} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-black text-admin-600 sm:text-sm">
+                    <div className="map-tool-stack absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
+                        <button onClick={() => mapRef.current && mapRef.current.zoomIn()} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xl font-black text-admin-600 shadow-soft transition-all hover:bg-white">+</button>
+                        <button onClick={() => mapRef.current && mapRef.current.zoomOut()} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xl font-black text-admin-600 shadow-soft transition-all hover:bg-white">-</button>
+                        <button onClick={() => setBaseMapMode((v) => (v === "vector" ? "satellite" : "vector"))} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xs font-black text-admin-600 shadow-soft transition-all hover:bg-white sm:text-sm">
                             {baseMapMode === "satellite" ? "切到矢量" : "切到卫星"}
                         </button>
-                        <button onClick={fitToVisibleRoutes} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-sm font-black text-admin-600">适配</button>
-                        <button onClick={toggleMapFullscreen} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-black text-admin-600 sm:text-sm">
+                        <button onClick={fitToVisibleRoutes} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-sm font-black text-admin-600 shadow-soft transition-all hover:bg-white">适配</button>
+                        <button onClick={toggleMapFullscreen} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xs font-black text-admin-600 shadow-soft transition-all hover:bg-white sm:text-sm">
                             {mapFullscreen ? "退出全屏" : "全屏"}
                         </button>
                     </div>
 
-                    <div className="absolute right-3 top-3 z-[900] w-[min(92vw,350px)] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft sm:right-4 sm:top-4 xl:w-[360px]">
+                    <div className="map-floating-panel absolute right-3 top-3 z-[900] w-[min(92vw,320px)] rounded-2xl border border-blue-100 bg-white/80 p-3 shadow-soft backdrop-blur-md sm:right-4 sm:top-4 xl:w-[330px]">
                         <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs font-bold tracking-wide text-slate-500">地图筛选控制</div>
+                            <div className="text-xs font-black tracking-wide text-admin-700">地图筛选控制</div>
                             <button
                                 onClick={() => setFilterPanelOpen((v) => !v)}
-                                className="rounded-md border border-blue-200 bg-white px-2 py-1 text-[11px] font-bold text-admin-600"
+                                className="rounded-lg border border-admin-200 bg-white/50 px-2 py-1 text-xs font-bold text-admin-600 transition-all hover:bg-white"
                             >
                                 {filterPanelOpen ? "收起" : "展开"}
                             </button>
@@ -1224,7 +1292,7 @@ function AdminApp() {
                                 <button
                                     type="button"
                                     onClick={showAllStudentsRoutes}
-                                    className={`rounded-md border px-2 py-1 text-xs font-bold ${!onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
+                                    className={`rounded-xl border px-3 py-2 text-xs font-bold transition-all ${!onlySelectedStudent ? "border-admin-300 bg-blue-50/80 shadow-sm text-admin-600" : "border-blue-200 bg-white text-slate-600 hover:border-admin-200"}`}
                                 >
                                     全部学生
                                 </button>
@@ -1232,7 +1300,7 @@ function AdminApp() {
                                     type="button"
                                     onClick={showSelectedStudentRoutes}
                                     disabled={selectedUserIds.length === 0}
-                                    className={`rounded-md border px-2 py-1 text-xs font-bold disabled:opacity-60 ${onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
+                                    className={`rounded-xl border px-3 py-2 text-xs font-bold transition-all disabled:opacity-60 ${onlySelectedStudent ? "border-admin-300 bg-blue-50/80 shadow-sm text-admin-600" : "border-blue-200 bg-white text-slate-600 hover:border-admin-200"}`}
                                 >
                                     仅选中学生
                                 </button>
@@ -1264,7 +1332,7 @@ function AdminApp() {
                             <select
                                 value={routeCategory}
                                 onChange={(e) => setRouteCategory(e.target.value)}
-                                className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
+                                className="modern-input mt-1 w-full rounded-xl px-3 py-2 text-xs"
                             >
                                 {categoryOptions.map((cat) => (
                                     <option key={cat} value={cat}>
@@ -1277,15 +1345,15 @@ function AdminApp() {
                             <input
                                 value={routeKeyword}
                                 onChange={(e) => setRouteKeyword(e.target.value)}
-                                className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
-                                placeholder="起终点/分类/学生名"
+                                className="modern-input mt-1 w-full rounded-xl px-3 py-2 text-xs"
+                                placeholder="输入起点、终点等..."
                             />
 
                             <div className="mt-2 text-xs font-semibold text-slate-500">线路标注</div>
                             <select
                                 value={lineLabelMode}
                                 onChange={(e) => setLineLabelMode(e.target.value)}
-                                className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
+                                className="modern-input mt-1 w-full rounded-xl px-3 py-2 text-xs"
                             >
                                 <option value="none">不显示标注</option>
                                 <option value="simple">仅姓名标注</option>
@@ -1294,64 +1362,66 @@ function AdminApp() {
 
                             <div className="mt-2 flex items-center justify-between">
                                 <div className="text-xs font-semibold text-slate-500">可见线路：{api.fmtNumber(activeRoutes.length)} 条</div>
-                                <button onClick={clearMapFilters} className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600">
-                                    清空筛选
-                                </button>
+                                <button type="button" onClick={clearMapFilters} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition-all hover:bg-slate-50">重置筛选</button>
                             </div>
                             <div className="mt-1 text-xs font-semibold text-slate-500">底图：{baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}</div>
                         </div>
                     </div>
 
-                    <div
-                        className="absolute bottom-4 left-4 z-[900] max-w-[440px] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft transition-all duration-500"
-                        style={{ transform: `scale(${detailCardScale})`, transformOrigin: "left bottom" }}
-                    >
-                        {!selectedUser && <div className="text-sm font-semibold text-slate-500">请选择学生查看详情。</div>}
-                        {selectedUser && (
-                            <div>
-                                <div className="mb-2 flex items-center justify-between">
-                                    <div className="text-xs font-bold text-slate-500">详情卡片缩放</div>
-                                    <div className="flex items-center gap-1">
-                                        <button
-                                            type="button"
-                                            onClick={() => setDetailCardScale((v) => Math.max(0.85, Number((v - 0.05).toFixed(2))))}
-                                            className="rounded-md border border-blue-200 bg-white px-2 py-0.5 text-xs font-black text-admin-600"
-                                        >
-                                            -
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setDetailCardScale(1)}
-                                            className="rounded-md border border-blue-200 bg-white px-2 py-0.5 text-xs font-black text-admin-600"
-                                        >
-                                            {Math.round(detailCardScale * 100)}%
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setDetailCardScale((v) => Math.min(1.4, Number((v + 0.05).toFixed(2))))}
-                                            className="rounded-md border border-blue-200 bg-white px-2 py-0.5 text-xs font-black text-admin-600"
-                                        >
-                                            +
-                                        </button>
+                    {selectedUser && (
+                        <div className="map-detail-card ios-pop-in absolute bottom-4 left-4 z-[900] w-[min(92vw,380px)] rounded-2xl border border-blue-100 bg-white/92 p-3.5 shadow-soft backdrop-blur-sm">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="truncate text-base font-black text-admin-600">{selectedUser.name || "未命名用户"}</div>
+                                    <div className="mt-0.5 truncate text-xs font-semibold text-slate-500">
+                                        @{selectedUser.username || "未设置"} · {selectedUser.status || "unknown"}
                                     </div>
                                 </div>
-                                <div className="text-lg font-black text-admin-600">{selectedUser.name}</div>
-                                <div className="text-xs font-semibold text-slate-500">
-                                    用户名：{selectedUser.username || "未设置"} | 状态：{selectedUser.status}
-                                </div>
-                                <div className="mt-2 text-xs font-semibold text-slate-600">
-                                    路线：{api.fmtNumber(selectedUser.route_count)} 条
-                                </div>
-                                <div className="mt-1 text-xs font-semibold text-slate-500">分类：{topCategoryText || "暂无"}</div>
-                                <div className="mt-1 text-xs font-semibold text-slate-500">最后活跃：{api.fmtTime(selectedUser.last_active_at)}</div>
-                                <div className="mt-2 text-xs font-semibold text-slate-500">删除操作请在左侧学生列表右键菜单中执行</div>
+                                <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-bold text-admin-600">
+                                    {api.fmtNumber(selectedUser.route_count || 0)} 条线路
+                                </span>
                             </div>
-                        )}
-                    </div>
+
+                            <div className="mt-2 grid grid-cols-2 gap-2 rounded-xl border border-blue-100/80 bg-blue-50/50 p-2">
+                                <div>
+                                    <div className="text-[11px] font-semibold text-slate-500">常用分类</div>
+                                    <div className="truncate text-xs font-bold text-slate-700">{topCategoryText || "暂无"}</div>
+                                </div>
+                                <div>
+                                    <div className="text-[11px] font-semibold text-slate-500">最近活跃</div>
+                                    <div className="truncate text-xs font-bold text-slate-700">{api.fmtTime(selectedUser.last_active_at)}</div>
+                                </div>
+                            </div>
+
+                            <div className="mt-2.5 grid grid-cols-3 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => zoomToStudent(selectedUser.id)}
+                                    className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-admin-600"
+                                >
+                                    定位该学生
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={showOnlyCurrentStudent}
+                                    className="rounded-lg border border-admin-200 bg-admin-50 px-2 py-1.5 text-xs font-bold text-admin-600"
+                                >
+                                    仅显示该学生
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={clearCurrentStudentSelection}
+                                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-600"
+                                >
+                                    清除选择
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </section>
 
                 {!mapFullscreen && (
-                    <aside className="ios-card space-y-3 overflow-auto rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft lg:col-span-2 2xl:col-span-1 2xl:max-h-[calc(100vh-220px)]">
+                    <aside className="order-3 ios-card space-y-2.5 overflow-auto rounded-[1.4rem] border border-blue-100 bg-white/95 p-3 shadow-soft sm:rounded-2xl lg:col-span-2 2xl:col-span-1 2xl:max-h-[calc(100vh-220px)]">
                         <div className="grid grid-cols-2 gap-2">
                             <MetricCard title="学生总数" value={api.fmtNumber(overview.total_students || 0)} />
                             <MetricCard title="在线学生" value={api.fmtNumber(overview.active_students || 0)} />
@@ -1364,9 +1434,9 @@ function AdminApp() {
                             />
                         </div>
 
-                        <div className="rounded-xl border border-blue-100 p-3">
+                        <div className="rounded-xl border border-blue-100 p-2.5">
                             <div className="mb-2 flex items-center justify-between">
-                                <div className="text-sm font-black text-admin-600">选中学生线路</div>
+                                <div className="text-xs font-black text-admin-600">选中学生线路</div>
                                 <div className="flex items-center gap-2">
                                     <button
                                         onClick={() => {
@@ -1381,7 +1451,7 @@ function AdminApp() {
                                         type="button"
                                         disabled={selectedUserRoutes.length === 0}
                                         onClick={() => setSelectedRouteIds(selectedUserRoutes.map((r) => String(r.id)))}
-                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
                                     >
                                         全选线路
                                     </button>
@@ -1389,7 +1459,7 @@ function AdminApp() {
                                         type="button"
                                         disabled={selectedRouteIds.length === 0}
                                         onClick={() => setSelectedRouteIds([])}
-                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
                                     >
                                         清空多选
                                     </button>
@@ -1417,7 +1487,7 @@ function AdminApp() {
                                 </div>
                             </div>
                             <div className="mb-2 text-xs font-semibold text-slate-500">支持 Ctrl/⌘ + 单击 进行线路多选，双击可直接定位线路</div>
-                            <div className="max-h-[240px] space-y-2 overflow-auto pr-1 2xl:max-h-[36vh]">
+                            <div className="max-h-[240px] space-y-1.5 overflow-auto pr-1 2xl:max-h-[36vh]">
                                 {selectedUserRoutes.slice(0, isCompactScreen ? 16 : 24).map((route) => (
                                     <div
                                         key={route.id}
@@ -1431,7 +1501,7 @@ function AdminApp() {
                                                 handleRouteRowClick(e, route);
                                             }
                                         }}
-                                        className={`rounded-lg border p-2 transition-all duration-200 ${selectedRouteIdSet.has(String(route.id)) ? "border-admin-300 bg-blue-50" : "border-blue-100 bg-blue-50/40"
+                                        className={`rounded-lg border p-1.5 transition-all duration-200 ${selectedRouteIdSet.has(String(route.id)) ? "border-admin-300 bg-blue-50" : "border-blue-100 bg-blue-50/40"
                                             }`}
                                     >
                                         <div className="flex items-center gap-2">
@@ -1442,7 +1512,7 @@ function AdminApp() {
                                                 onChange={(e) => toggleRouteSelection(route.id, e.target.checked)}
                                                 className="h-4 w-4"
                                             />
-                                            <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700">{routeBrief(route)}</div>
+                                            <div className="min-w-0 flex-1 truncate text-xs font-bold text-slate-700">{routeBrief(route)}</div>
                                         </div>
                                         <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
                                         <div className="mt-1 flex items-center justify-end gap-2">

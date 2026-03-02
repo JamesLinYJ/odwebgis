@@ -6,9 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OD 流向录入与分析</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/misans.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.generated.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/motion.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/motion.css', v='20260302-mobileaudit') }}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
             font-family: "MiSans", "Microsoft YaHei", "PingFang SC", sans-serif;
@@ -25,14 +25,13 @@
 <body class="min-h-screen text-slate-800 safe-pb">
     <div id="app"></div>
 
-    <script src="{{ url_for('static', filename='vendor/react/react.production.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='vendor/react/react-dom.production.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='vendor/babel/babel.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
-    <script src="{{ url_for('static', filename='vendor/leaflet-heat/leaflet-heat.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/od-export.js') }}"></script>
-    <script type="text/babel" src="{{ url_for('static', filename='js/explorer-react.jsx') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.0/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="{{ url_for('static', filename='js/api.js', v='20260302-mobileaudit') }}"></script>
+    <script type="text/babel" src="{{ url_for('static', filename='js/explorer-react.jsx', v='20260302-mobileaudit') }}"></script>
 </body>
 
 </html>

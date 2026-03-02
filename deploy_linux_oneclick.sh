@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 HOST="${WEBGIS_HOST:-0.0.0.0}"
 PORT="${WEBGIS_PORT:-5000}"
 MAP_KEY="${TIANDITU_API_KEY:-}"
+SECRET_KEY="${WEBGIS_SECRET_KEY:-}"
 ADMIN_USERNAME="${WEBGIS_DEFAULT_ADMIN_USERNAME:-admin}"
 ADMIN_PASSWORD="${WEBGIS_DEFAULT_ADMIN_PASSWORD:-}"
 ADMIN_NAME="${WEBGIS_DEFAULT_ADMIN_NAME:-DefaultAdmin}"
@@ -16,6 +17,7 @@ FORCE_CHANGE=0
 AUTO_INSTALL_NODE="${AUTO_INSTALL_NODE:-1}"
 PKG_TIMEOUT_SECONDS="${PKG_TIMEOUT_SECONDS:-240}"
 NPM_TIMEOUT_SECONDS="${NPM_TIMEOUT_SECONDS:-180}"
+VENV_DIR="${VENV_DIR:-.venv}"
 MAP_KEY_ARG_PROVIDED=0
 ADMIN_USERNAME_ARG_PROVIDED=0
 ADMIN_PASSWORD_ARG_PROVIDED=0
@@ -28,6 +30,7 @@ Options:
   --host <host>                     Service host, default 0.0.0.0
   --port <port>                     Service port, default 5000
   --map-key <key>                   TianDiTu API key
+  --secret-key <key>                WEBGIS session secret key (auto-generate if omitted)
   --admin-username <username>       Default admin username, default admin
   --admin-password <password>       Default admin password (if omitted, interactive/autogen)
   --admin-name <name>               Default admin display name
@@ -54,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --host) HOST="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --map-key) MAP_KEY="$2"; MAP_KEY_ARG_PROVIDED=1; shift 2 ;;
+    --secret-key) SECRET_KEY="$2"; shift 2 ;;
     --admin-username) ADMIN_USERNAME="$2"; ADMIN_USERNAME_ARG_PROVIDED=1; shift 2 ;;
     --admin-password) ADMIN_PASSWORD="$2"; ADMIN_PASSWORD_ARG_PROVIDED=1; shift 2 ;;
     --admin-name) ADMIN_NAME="$2"; shift 2 ;;
@@ -98,7 +102,7 @@ def get(path):
         return r.status, json.loads(r.read().decode('utf-8'))
 
 pw='sha256:'+hashlib.sha256(password.encode('utf-8')).hexdigest()
-status,_=post('/api/auth/login', {'account': username, 'password': pw})
+status,_=post('/api/auth/login', {'username': username, 'password': pw})
 assert status == 200, 'admin login failed'
 assert get('/api/admin/overview')[0] == 200
 assert get('/api/admin/accounts')[0] == 200
@@ -166,28 +170,41 @@ PY
 fi
 
 echo "[INFO] Step 1/6: setup Python env and optional Node.js env"
-AUTO_INSTALL_NODE="$AUTO_INSTALL_NODE" PKG_TIMEOUT_SECONDS="$PKG_TIMEOUT_SECONDS" ./setup_linux.sh
+AUTO_INSTALL_NODE="$AUTO_INSTALL_NODE" \
+PKG_TIMEOUT_SECONDS="$PKG_TIMEOUT_SECONDS" \
+VENV_DIR="$VENV_DIR" \
+./setup_linux.sh
 
 # shellcheck disable=SC1091
-source .venv/bin/activate
+source "$VENV_DIR/bin/activate"
 
 echo "[INFO] Step 2/6: save map key"
 python manage_map_key.py set --key "$MAP_KEY"
 python manage_map_key.py check || true
 
 echo "[INFO] Step 3/6: build Tailwind CSS"
-if command -v npm >/dev/null 2>&1; then
+if command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
   NPM_TIMEOUT_SECONDS="$NPM_TIMEOUT_SECONDS" ./build_tailwind.sh
 else
-  echo "[WARN] npm not found, use standalone Tailwind binary."
+  echo "[WARN] node/npm unavailable, use standalone Tailwind binary."
   TAILWIND_USE_STANDALONE=1 ./build_tailwind.sh
 fi
 
 echo "[INFO] Step 4/6: write runtime env"
+if [[ -z "$SECRET_KEY" ]]; then
+  SECRET_KEY="$(python - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+)"
+  echo "[INFO] Generated WEBGIS_SECRET_KEY automatically."
+fi
+
 cat > .env.webgis <<EOF
 WEBGIS_HOST="$HOST"
 WEBGIS_PORT="$PORT"
 TIANDITU_API_KEY="$MAP_KEY"
+WEBGIS_SECRET_KEY="$SECRET_KEY"
 EOF
 
 if [[ -n "$SYSTEM_ADMIN_ACCOUNT" ]]; then
@@ -200,6 +217,8 @@ if [[ -n "$SYSTEM_ADMIN_PASSWORD" ]]; then
 WEBGIS_SYSTEM_ADMIN_PASSWORD="$SYSTEM_ADMIN_PASSWORD"
 EOF
 fi
+
+chmod 600 .env.webgis || true
 
 echo "[INFO] Step 5/6: start service"
 ./start_linux.sh
@@ -215,7 +234,7 @@ PY
 )"
 
 if [[ "$ACCOUNT_EXISTS" == "1" ]]; then
-  python manage_accounts.py set-role --username "$ADMIN_USERNAME" --user-type admin
+  python manage_accounts.py update --username "$ADMIN_USERNAME" --user-type admin
   if [[ "$FORCE_CHANGE" == "1" ]]; then
     python manage_accounts.py reset-password --username "$ADMIN_USERNAME" --password "$ADMIN_PASSWORD" --force-change
   else

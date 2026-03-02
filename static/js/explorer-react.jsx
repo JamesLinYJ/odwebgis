@@ -3,21 +3,43 @@ const { useEffect, useMemo, useRef, useState } = React;
 
 function buildCurve(start, end, segments = 40) {
   const [lat1, lon1] = start;
-  const [lat2, lon2] = end;
+  const [lat2Raw, lon2Raw] = end;
+  const lat2 = Number(lat2Raw);
+  let lon2 = Number(lon2Raw);
+  if (![lat1, lon1, lat2, lon2].every((v) => Number.isFinite(v))) {
+    return [start, end];
+  }
+
+  // Keep arc generation stable near the 180° meridian.
+  let dxLon = lon2 - lon1;
+  if (dxLon > 180) {
+    lon2 -= 360;
+    dxLon = lon2 - lon1;
+  } else if (dxLon < -180) {
+    lon2 += 360;
+    dxLon = lon2 - lon1;
+  }
+  const dyLat = lat2 - lat1;
+  const dist = Math.sqrt(dxLon * dxLon + dyLat * dyLat);
+
+  if (dist < 1e-4) {
+    return [start, end];
+  }
+
   const midLat = (lat1 + lat2) / 2;
   const midLon = (lon1 + lon2) / 2;
-  const dx = lon2 - lon1;
-  const dy = lat2 - lat1;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  const offset = Math.max(0.9, dist * 0.2);
-  const ctrlLat = midLat + (dx / (dist || 1)) * offset;
-  const ctrlLon = midLon - (dy / (dist || 1)) * offset;
+  // Adaptive curvature: close points keep near-straight lines, long routes keep a gentle arc.
+  const ratio = dist < 0.08 ? 0.04 : dist < 0.35 ? 0.08 : dist < 1.2 ? 0.12 : 0.16;
+  const offset = Math.min(6, dist * ratio);
+  const ctrlLat = midLat + (dxLon / dist) * offset;
+  const ctrlLon = midLon - (dyLat / dist) * offset;
   const points = [];
   for (let i = 0; i <= segments; i += 1) {
     const t = i / segments;
     const lat = (1 - t) * (1 - t) * lat1 + 2 * (1 - t) * t * ctrlLat + t * t * lat2;
     const lon = (1 - t) * (1 - t) * lon1 + 2 * (1 - t) * t * ctrlLon + t * t * lon2;
-    points.push([lat, lon]);
+    const normalizedLon = lon > 180 ? lon - 360 : lon < -180 ? lon + 360 : lon;
+    points.push([lat, normalizedLon]);
   }
   return points;
 }
@@ -25,28 +47,61 @@ function buildCurve(start, end, segments = 40) {
 function attachMapDecorControls(map) {
   if (!map || !window.L) return;
 
-  const northControl = L.control({ position: "bottomright" });
-  northControl.onAdd = () => {
-    const container = L.DomUtil.create("div", "leaflet-control leaflet-control-north");
-    container.innerHTML = `
-      <div class="north-indicator" aria-label="指北针" title="北向">
-        <span class="north-indicator-arrow"></span>
-        <span class="north-indicator-text">N</span>
+  /* ─── Unified bottom-right container ─── */
+  const decorControl = L.control({ position: "bottomright" });
+  decorControl.onAdd = () => {
+    const wrap = L.DomUtil.create("div", "map-decor-controls");
+    wrap.innerHTML = `
+      <div class="map-compass" aria-label="指北针" title="指向北方">
+        <svg viewBox="0 0 40 40" width="36" height="36" class="compass-needle">
+          <polygon points="20,4 24,20 20,17 16,20" fill="#dc2626"/>
+          <polygon points="20,36 16,20 20,23 24,20" fill="#94a3b8"/>
+          <circle cx="20" cy="20" r="2.5" fill="white" stroke="#475569" stroke-width="1"/>
+        </svg>
+        <span class="compass-label">N</span>
+      </div>
+      <div class="map-scale-bar">
+        <div class="scale-line"></div>
+        <div class="scale-text"></div>
       </div>
     `;
-    L.DomEvent.disableClickPropagation(container);
-    L.DomEvent.disableScrollPropagation(container);
-    return container;
+    L.DomEvent.disableClickPropagation(wrap);
+    L.DomEvent.disableScrollPropagation(wrap);
+    return wrap;
   };
-  northControl.addTo(map);
+  decorControl.addTo(map);
 
-  L.control.scale({
-    position: "bottomright",
-    metric: true,
-    imperial: false,
-    maxWidth: 140,
-    updateWhenIdle: true,
-  }).addTo(map);
+  /* ─── Auto-updating scale bar ─── */
+  const scaleText = decorControl.getContainer().querySelector(".scale-text");
+  const scaleLine = decorControl.getContainer().querySelector(".scale-line");
+  
+  function pickNiceScaleDistance(maxMeters) {
+    if (!Number.isFinite(maxMeters) || maxMeters <= 0) return 1;
+    const target = maxMeters * 0.72;
+    const exponent = Math.floor(Math.log10(target));
+    const base = Math.pow(10, exponent);
+    const fraction = target / base;
+    let niceFraction = 1;
+    if (fraction >= 5) niceFraction = 5;
+    else if (fraction >= 2) niceFraction = 2;
+    return niceFraction * base;
+  }
+
+  function updateScale() {
+    if (!scaleText || !scaleLine || !map.getSize) return;
+    const mapSize = map.getSize();
+    const maxWidthPx = 100;
+    const point1 = map.containerPointToLatLng([mapSize.x / 2 - maxWidthPx / 2, mapSize.y / 2]);
+    const point2 = map.containerPointToLatLng([mapSize.x / 2 + maxWidthPx / 2, mapSize.y / 2]);
+    const distMeters = map.distance(point1, point2);
+    const niceMeters = pickNiceScaleDistance(distMeters);
+    const ratio = Math.max(0.12, Math.min(1, niceMeters / distMeters));
+    const barWidth = Math.max(20, Math.round(maxWidthPx * ratio));
+    scaleLine.style.width = `${barWidth}px`;
+    scaleText.textContent = niceMeters >= 1000 ? `${(niceMeters / 1000).toFixed(niceMeters % 1000 === 0 ? 0 : 1)} km` : `${Math.round(niceMeters)} m`;
+  }
+  map.on("zoomend moveend resize", updateScale);
+  setTimeout(updateScale, 200);
 }
 
 function normalizeCoordText(raw) {
@@ -236,15 +291,15 @@ function StatCard({ title, value, hint }) {
 
 function SectionCard({ title, open, onToggle, children, rightNode }) {
   return (
-    <div className="ios-card rounded-2xl border border-blue-100 bg-white/95 p-3 shadow-soft">
+    <div className="ios-card rounded-2xl border border-blue-100 bg-white/95 p-2.5 shadow-soft">
       <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-2 text-left">
-        <div className="text-sm font-black text-brand-700">{title}</div>
+        <div className="text-[13px] font-black text-brand-700">{title}</div>
         <div className="flex items-center gap-2">
           {rightNode}
           <span className="text-xs font-bold text-slate-500">{open ? "收起" : "展开"}</span>
         </div>
       </button>
-      <div className={`ios-collapse ${open ? "mt-3 max-h-[1800px] opacity-100" : "max-h-0 opacity-0"}`}>
+      <div className={`ios-collapse ${open ? "mt-2.5 max-h-[1800px] opacity-100" : "max-h-0 opacity-0"}`}>
         {children}
       </div>
     </div>
@@ -254,52 +309,38 @@ function SectionCard({ title, open, onToggle, children, rightNode }) {
 function DmsAxisInput({ axis, value, onChange }) {
   const dirs = axis === "lat" ? ["N", "S"] : ["E", "W"];
   return (
-    <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-1.5">
-      <input value={value.deg} onChange={(e) => onChange({ ...value, deg: e.target.value })} className="rounded-lg border border-blue-200 px-2 py-1.5 text-xs" placeholder="度" />
-      <input value={value.min} onChange={(e) => onChange({ ...value, min: e.target.value })} className="rounded-lg border border-blue-200 px-2 py-1.5 text-xs" placeholder="分" />
-      <input value={value.sec} onChange={(e) => onChange({ ...value, sec: e.target.value })} className="rounded-lg border border-blue-200 px-2 py-1.5 text-xs" placeholder="秒" />
-      <select value={value.dir} onChange={(e) => onChange({ ...value, dir: e.target.value })} className="rounded-lg border border-blue-200 px-2 py-1.5 text-xs">
+    <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
+      <input value={value.deg} onChange={(e) => onChange({ ...value, deg: e.target.value })} className="modern-input rounded-xl px-3 py-1.5 text-xs" placeholder="度" />
+      <input value={value.min} onChange={(e) => onChange({ ...value, min: e.target.value })} className="modern-input rounded-xl px-3 py-1.5 text-xs" placeholder="分" />
+      <input value={value.sec} onChange={(e) => onChange({ ...value, sec: e.target.value })} className="modern-input rounded-xl px-3 py-1.5 text-xs" placeholder="秒" />
+      <select value={value.dir} onChange={(e) => onChange({ ...value, dir: e.target.value })} className="modern-input rounded-xl px-3 py-1.5 text-xs font-bold">
         {dirs.map((d) => <option key={d} value={d}>{d}</option>)}
       </select>
     </div>
   );
 }
 
-function CampusShortcutCard({ campus, onPickOrigin, onPickDestination, onLocate }) {
-  return (
-    <div className="rounded-xl border border-blue-100 bg-gradient-to-br from-white to-blue-50/60 p-2.5">
-      <div className="text-xs font-black text-slate-700">{campus.name}</div>
-      <div className="mt-0.5 text-[11px] font-semibold text-slate-500">{formatCoord(campus.lat_wgs84 ?? campus.lat, campus.lon_wgs84 ?? campus.lon)}</div>
-      <div className="mt-2 grid grid-cols-3 gap-1.5">
-        <button type="button" onClick={onPickOrigin} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-[11px] font-bold text-brand-700">设 O</button>
-        <button type="button" onClick={onPickDestination} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-[11px] font-bold text-brand-700">设 D</button>
-        <button type="button" onClick={onLocate} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-[11px] font-bold text-brand-700">定位</button>
-      </div>
-    </div>
-  );
-}
-
 function EndpointEditor({ title, endpoint, setEndpoint, coordMode }) {
   return (
-    <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
-      <div className="mb-2 text-xs font-bold text-slate-600">{title}</div>
-      <input value={endpoint.name} onChange={(e) => setEndpoint((p) => ({ ...p, name: e.target.value }))} className="mb-2 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-sm" placeholder={`${title}名称（可选）`} />
+    <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-3">
+      <div className="mb-2 text-[13px] font-black text-slate-700">{title}</div>
+      <input value={endpoint.name} onChange={(e) => setEndpoint((p) => ({ ...p, name: e.target.value }))} className="modern-input mb-3 w-full rounded-xl px-3.5 py-2 text-xs" placeholder={`${title}名称（可选）`} />
 
-      <div className={`ios-collapse ${coordMode === "decimal" ? "max-h-[84px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}>
-        <div className={`grid grid-cols-2 gap-2 ios-mode-panel ${coordMode === "decimal" ? "ios-mode-panel-show" : "ios-mode-panel-hide"}`}>
-          <input value={endpoint.decimal.lat} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lat: e.target.value } }))} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm" placeholder="纬度" />
-          <input value={endpoint.decimal.lon} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lon: e.target.value } }))} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm" placeholder="经度" />
+      <div className={`ios-collapse ${coordMode === "decimal" ? "max-h-[72px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}>
+        <div className={`grid grid-cols-2 gap-3 ios-mode-panel ${coordMode === "decimal" ? "ios-mode-panel-show" : "ios-mode-panel-hide"}`}>
+          <input value={endpoint.decimal.lat} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lat: e.target.value } }))} className="modern-input rounded-xl px-3.5 py-2 text-xs" placeholder="纬度" />
+          <input value={endpoint.decimal.lon} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lon: e.target.value } }))} className="modern-input rounded-xl px-3.5 py-2 text-xs" placeholder="经度" />
         </div>
       </div>
 
-      <div className={`ios-collapse ${coordMode === "dms" ? "mt-2 max-h-[180px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}>
-        <div className={`space-y-2 ios-mode-panel ${coordMode === "dms" ? "ios-mode-panel-show" : "ios-mode-panel-hide"}`}>
+      <div className={`ios-collapse ${coordMode === "dms" ? "mt-2 max-h-[166px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}>
+        <div className={`space-y-3 ios-mode-panel ${coordMode === "dms" ? "ios-mode-panel-show" : "ios-mode-panel-hide"}`}>
           <div>
-            <div className="mb-1 text-[11px] font-semibold text-slate-500">纬度（度/分/秒）</div>
+            <div className="mb-2 text-xs font-bold text-slate-500">纬度（度/分/秒）</div>
             <DmsAxisInput axis="lat" value={endpoint.dms.lat} onChange={(next) => setEndpoint((p) => ({ ...p, dms: { ...p.dms, lat: next } }))} />
           </div>
           <div>
-            <div className="mb-1 text-[11px] font-semibold text-slate-500">经度（度/分/秒）</div>
+            <div className="mb-2 text-xs font-bold text-slate-500">经度（度/分/秒）</div>
             <DmsAxisInput axis="lon" value={endpoint.dms.lon} onChange={(next) => setEndpoint((p) => ({ ...p, dms: { ...p.dms, lon: next } }))} />
           </div>
         </div>
@@ -329,6 +370,8 @@ function ExplorerApp() {
   const [inputCoordSystem, setInputCoordSystem] = useState("wgs84");
   const [originInput, setOriginInput] = useState(createEndpointState());
   const [destinationInput, setDestinationInput] = useState(createEndpointState());
+  const [activeEndpoint, setActiveEndpoint] = useState("origin");
+  const [selectedCampusKey, setSelectedCampusKey] = useState("hznu-cangqian");
   const [routeCategory, setRouteCategory] = useState("课堂");
 
   const [pickTarget, setPickTarget] = useState(null);
@@ -339,7 +382,6 @@ function ExplorerApp() {
   const [entryOpen, setEntryOpen] = useState(true);
   const [recentOpen, setRecentOpen] = useState(true);
   const [mapFullscreen, setMapFullscreen] = useState(false);
-  const [exportingPoster, setExportingPoster] = useState(false);
   const [baseMapMode, setBaseMapMode] = useState("vector");
   const [isCompactScreen, setIsCompactScreen] = useState(false);
   const layoutAutoInitRef = useRef(false);
@@ -377,6 +419,15 @@ function ExplorerApp() {
     const mine = allRoutes.filter((r) => Number(r.user_id) === Number(me.id));
     return { count: mine.length };
   }, [allRoutes, me]);
+
+  const activeEndpointInput = activeEndpoint === "origin" ? originInput : destinationInput;
+  const setActiveEndpointInput = activeEndpoint === "origin" ? setOriginInput : setDestinationInput;
+  const activeEndpointTitle = activeEndpoint === "origin" ? "起点 O" : "终点 D";
+  const selectedCampus = useMemo(
+    () => campusShortcuts.find((item) => item.key === selectedCampusKey) || campusShortcuts[0] || null,
+    [campusShortcuts, selectedCampusKey]
+  );
+
   function syncEndpointFromDecimal(kind, lat, lon, fallbackName) {
     const lat6 = Number(lat.toFixed(6));
     const lon6 = Number(lon.toFixed(6));
@@ -519,7 +570,7 @@ function ExplorerApp() {
 
   useEffect(() => {
     const updateLayout = () => {
-      const compact = window.matchMedia("(max-width: 1280px)").matches;
+      const compact = window.matchMedia("(max-width: 1024px)").matches;
       setIsCompactScreen(compact);
       if (!layoutAutoInitRef.current) {
         setFilterOpen(!compact);
@@ -535,9 +586,7 @@ function ExplorerApp() {
 
   useEffect(() => {
     if (!mapHostRef.current || mapRef.current) return;
-    const map = L.map(mapHostRef.current, { zoomControl: false, minZoom: 4, attributionControl: false }).setView([35.2, 104.2], 5);
-    const chinaBounds = [[18.0, 73.0], [54.5, 135.5]];
-    map.setMaxBounds(chinaBounds);
+    const map = L.map(mapHostRef.current, { zoomControl: false, minZoom: 2, attributionControl: false }).setView([20, 110], 3);
     const vec = L.tileLayer("/api/map/tile/vec/{z}/{x}/{y}", { maxZoom: 18 });
     const cva = L.tileLayer("/api/map/tile/cva/{z}/{x}/{y}", { maxZoom: 18 });
     const img = L.tileLayer("/api/map/tile/img/{z}/{x}/{y}", { maxZoom: 18 });
@@ -545,7 +594,6 @@ function ExplorerApp() {
     vec.addTo(map);
     cva.addTo(map);
     baseTileLayersRef.current = { vec, cva, img, cia };
-    map.fitBounds(chinaBounds, { padding: [18, 18] });
     attachMapDecorControls(map);
     mapRef.current = map;
     routeLayerRef.current = L.layerGroup().addTo(map);
@@ -592,10 +640,12 @@ function ExplorerApp() {
       const { lat, lng } = e.latlng;
       if (pickTarget === "origin") {
         syncEndpointFromDecimal("origin", lat, lng, "地图起点");
+        setActiveEndpoint("destination");
         setPickTarget("destination");
         api.notify("已设置起点 O，请点击终点 D");
       } else {
         syncEndpointFromDecimal("destination", lat, lng, "地图终点");
+        setActiveEndpoint("destination");
         setPickTarget(null);
         api.notify("已设置终点 D，可以提交线路");
       }
@@ -680,19 +730,19 @@ function ExplorerApp() {
         if (mapRef.current) {
           mapRef.current.fitBounds([[origin.lat, origin.lon], [destination.lat, destination.lon]], { padding: [45, 45] });
         }
-        api.notify("已生成当前录入的 OD 图");
+        api.notify("已更新为当前输入的 O-D 展示");
         return;
       }
 
       if (visibleRoutes.length > 0) {
         fitCurrentRoutes();
-        api.notify("已根据当前筛选生成 OD 图");
+        api.notify("已按当前筛选更新地图展示");
         return;
       }
 
       api.notify("请先录入线路或输入起终点坐标", true);
     } catch (err) {
-      api.notify(err.message || "生成 OD 图失败", true);
+      api.notify(err.message || "更新地图展示失败", true);
     }
   }
 
@@ -714,67 +764,6 @@ function ExplorerApp() {
     }
     // Fallback: 浏览器不支持 Fullscreen API 时仍保留页面内全屏体验
     setMapFullscreen((v) => !v);
-  }
-
-  function collectExportRoutes() {
-    if (visibleRoutes.length > 0) {
-      return visibleRoutes;
-    }
-
-    if (originPoint && destinationPoint) {
-      return [
-        {
-          id: "draft-route",
-          origin_name: originInput.name || "起点 O",
-          origin_lat: originPoint[0],
-          origin_lon: originPoint[1],
-          destination_name: destinationInput.name || "终点 D",
-          destination_lat: destinationPoint[0],
-          destination_lon: destinationPoint[1],
-          category: routeCategory || "课堂",
-          user_name: me?.name || me?.username || "",
-          created_at: new Date().toISOString(),
-        },
-      ];
-    }
-    return [];
-  }
-
-  async function exportOdPoster(format = "png") {
-    if (!window.odExport || typeof window.odExport.downloadPoster !== "function") {
-      api.notify("导出模块未加载", true);
-      return;
-    }
-    const routes = collectExportRoutes();
-    if (routes.length === 0) {
-      api.notify("暂无可导出的线路，请先生成或筛选线路", true);
-      return;
-    }
-    setExportingPoster(true);
-    try {
-      const who = me?.name || me?.username || "";
-      await window.odExport.downloadPoster(routes, {
-        format,
-        title: "OD 流向图导出",
-        subtitle: showOnlyMine ? "当前筛选：仅我的线路" : "当前筛选：全部可见线路",
-        owner: who,
-        filename: `od_student_${new Date().toISOString().slice(0, 10)}`,
-        categoryColors,
-        width: 1920,
-        height: 1080,
-        scale: 2,
-        map: format === "png" ? mapRef.current : null,
-        baseMapMode,
-        mapScale: 2.2,
-        qualityScale: 1.8,
-        labelLimit: 120,
-      });
-      api.notify(format === "svg" ? "OD 图 SVG 已导出" : "OD 图 PNG 已导出");
-    } catch (err) {
-      api.notify(err.message || "导出失败", true);
-    } finally {
-      setExportingPoster(false);
-    }
   }
 
   function syncInputPointsToMap() {
@@ -800,43 +789,12 @@ function ExplorerApp() {
     }
   }
 
-  function applyCampusShortcut(campus, target = "auto") {
-    if (!campus) return;
-    const targetLat = Number.isFinite(campus.lat_wgs84) ? campus.lat_wgs84 : campus.lat;
-    const targetLon = Number.isFinite(campus.lon_wgs84) ? campus.lon_wgs84 : campus.lon;
-    const targetPoint = [targetLat, targetLon];
-    let applyTarget = target;
-    if (applyTarget === "auto") {
-      if (pickTarget === "origin" || pickTarget === "destination") {
-        applyTarget = pickTarget;
-      } else if (!originPoint) {
-        applyTarget = "origin";
-      } else if (!destinationPoint) {
-        applyTarget = "destination";
-      } else {
-        applyTarget = "destination";
-      }
-    }
-    if (applyTarget === "origin") {
-      syncEndpointFromDecimal("origin", targetLat, targetLon, campus.name);
-      if (pickTarget === "origin") setPickTarget("destination");
-      api.notify(`已将 ${campus.name} 设为起点 O`);
-    } else {
-      syncEndpointFromDecimal("destination", targetLat, targetLon, campus.name);
-      if (pickTarget === "destination") setPickTarget(null);
-      api.notify(`已将 ${campus.name} 设为终点 D`);
-    }
-    if (mapRef.current) {
-      const zoom = Math.max(mapRef.current.getZoom(), 14);
-      mapRef.current.setView(targetPoint, zoom, { animate: true });
-    }
-  }
-
   function clearInputs() {
     setOriginInput(createEndpointState());
     setDestinationInput(createEndpointState());
     setOriginPoint(null);
     setDestinationPoint(null);
+    setActiveEndpoint("origin");
     setPickTarget(null);
   }
 
@@ -845,6 +803,7 @@ function ExplorerApp() {
     setDestinationInput(originInput);
     setOriginPoint(destinationPoint);
     setDestinationPoint(originPoint);
+    setActiveEndpoint((prev) => (prev === "origin" ? "destination" : "origin"));
   }
 
   async function submitRoute(e) {
@@ -908,135 +867,196 @@ function ExplorerApp() {
     <div className="relative mx-auto max-w-[1880px] p-3 sm:p-4 ios-fade-up">
       <div className="pointer-events-none absolute -left-16 -top-10 h-36 w-36 rounded-full bg-cyan-200/35 blur-3xl" />
       <div className="pointer-events-none absolute -right-8 top-12 h-28 w-28 rounded-full bg-blue-200/35 blur-3xl" />
-      <header className="ios-card mb-3 rounded-2xl border border-blue-100 bg-white/95 px-4 py-3 shadow-soft">
+      <header className="ios-card mb-4 rounded-[1.4rem] border border-blue-100 bg-white/80 px-4 py-3 sm:rounded-[2rem] sm:px-6 sm:py-4 shadow-soft">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-xl font-black text-brand-700 sm:text-2xl">OD 流向录入与分析</div>
             <div className="text-xs font-semibold text-slate-500 sm:text-sm">支持地图点选与十进制度/度分秒输入</div>
-            {me && <div className="text-xs font-semibold text-slate-500">当前用户：{me.username || "-"}</div>}
+            {me && <div className="text-xs font-semibold text-slate-500">当前用户：{me.is_guest ? me.name : (me.username || "-")}</div>}
           </div>
           <div className="w-full sm:w-auto">
             <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
-              <button onClick={() => Promise.all([loadMe(), loadRoutes()])} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">刷新</button>
-              <button onClick={generateOdMap} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">生成 OD 图</button>
-              <button onClick={() => exportOdPoster("png")} disabled={exportingPoster} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 disabled:opacity-60 sm:text-sm">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
-              <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">账户中心</button>
-              <button onClick={logout} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">退出登录</button>
+              <button onClick={() => Promise.all([loadMe(), loadRoutes()])} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 sm:text-sm">刷新</button>
+              <button onClick={generateOdMap} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 sm:text-sm">更新地图展示</button>
+              <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 sm:text-sm">账户中心</button>
+              <button onClick={logout} className="shrink-0 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-bold text-rose-600 transition-all hover:bg-rose-50 sm:text-sm">退出登录</button>
             </div>
           </div>
         </div>
       </header>
 
-      <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_430px]"}>
-        <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "relative h-[56vh] min-h-[340px] overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-soft sm:h-[68vh] sm:min-h-[520px] lg:h-[calc(100vh-212px)] lg:min-h-[560px] xl:min-h-[620px]"} ios-card`}>
+      <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_400px]"}>
+        <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "relative h-[54vh] min-h-[300px] overflow-hidden rounded-[1.4rem] border border-blue-100 bg-white/80 shadow-soft sm:h-[68vh] sm:min-h-[520px] sm:rounded-[2rem] lg:h-[calc(100vh-212px)] lg:min-h-[560px] xl:min-h-[620px]"} ios-card`}>
           <div ref={mapHostRef} className="h-full w-full" />
 
-          <div className="absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
-            <button onClick={() => mapRef.current && mapRef.current.zoomIn()} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xl font-black text-brand-700">+</button>
-            <button onClick={() => mapRef.current && mapRef.current.zoomOut()} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xl font-black text-brand-700">-</button>
-            <button onClick={() => setBaseMapMode((v) => (v === "vector" ? "satellite" : "vector"))} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xs font-black text-brand-700 sm:text-sm">{baseMapMode === "satellite" ? "切到矢量" : "切到卫星"}</button>
-            <button onClick={fitCurrentRoutes} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xs font-black text-brand-700 sm:text-sm">适配</button>
-            <button onClick={toggleMapFullscreen} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xs font-black text-brand-700 sm:text-sm">{mapFullscreen ? "退出全屏" : "全屏"}</button>
+          <div className="map-tool-stack absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
+            <button onClick={() => mapRef.current && mapRef.current.zoomIn()} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xl font-black text-admin-600 shadow-soft transition-all hover:bg-white">+</button>
+            <button onClick={() => mapRef.current && mapRef.current.zoomOut()} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xl font-black text-admin-600 shadow-soft transition-all hover:bg-white">-</button>
+            <button onClick={() => setBaseMapMode((v) => (v === "vector" ? "satellite" : "vector"))} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xs font-black text-admin-600 shadow-soft transition-all hover:bg-white sm:text-sm">{baseMapMode === "satellite" ? "切到矢量" : "切到卫星"}</button>
+            <button onClick={fitCurrentRoutes} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-sm font-black text-admin-600 shadow-soft transition-all hover:bg-white">适配</button>
+            <button onClick={toggleMapFullscreen} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xs font-black text-admin-600 shadow-soft transition-all hover:bg-white sm:text-sm">{mapFullscreen ? "退出全屏" : "全屏"}</button>
           </div>
 
-          <div className="absolute right-3 top-3 z-[900] w-[min(92vw,340px)] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft sm:right-4 sm:top-4 xl:w-[360px]">
-            <div className="text-xs font-bold tracking-wide text-slate-500">当前操作状态</div>
-            <div className="mt-1 text-sm font-bold text-slate-700">
-              {pickTarget === "origin" && "点击地图设置起点 O"}
-              {pickTarget === "destination" && "点击地图设置终点 D"}
-              {!pickTarget && "可手动输入或点击下方按钮开始点选"}
+          <div className="map-detail-card absolute left-3 bottom-3 z-[900] w-[min(92vw,320px)] rounded-2xl border border-blue-100/80 bg-white/75 px-3 py-2.5 shadow-sm backdrop-blur-md sm:left-4 sm:bottom-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[11px] font-bold tracking-wide text-admin-700">地图状态</div>
+              <div className="text-[10px] font-semibold text-slate-500">{baseMapMode === "satellite" ? "卫星" : "矢量"} · {inputCoordSystem === "gcj02" ? "GCJ-02" : "WGS84"}</div>
             </div>
-            <div className="mt-1 text-xs font-semibold text-slate-500">可拖拽 O/D 标记微调坐标。</div>
-            <div className="mt-2 text-xs font-semibold text-slate-500">O（WGS84）: {originPoint ? formatCoord(originPoint[0], originPoint[1]) : "未设置"}</div>
-            <div className="text-xs font-semibold text-slate-500">D（WGS84）: {destinationPoint ? formatCoord(destinationPoint[0], destinationPoint[1]) : "未设置"}</div>
-            <div className="text-xs font-semibold text-slate-500">输入坐标系：{inputCoordSystem === "gcj02" ? "GCJ-02" : "WGS84"}</div>
-            <div className="text-xs font-semibold text-slate-500">底图：{baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}</div>
+            <div className="mt-1.5 text-[11px] font-semibold text-slate-600 leading-tight">
+              {pickTarget === "origin" && "正在点选起点 O"}
+              {pickTarget === "destination" && "正在点选终点 D"}
+              {!pickTarget && "可通过地图点选或右侧表单录入 O/D"}
+            </div>
+            <div className="mt-1.5 grid grid-cols-2 gap-x-2 text-[10px] font-semibold text-slate-500 leading-tight">
+              <div>O: {originPoint ? formatCoord(originPoint[0], originPoint[1]) : "未设置"}</div>
+              <div>D: {destinationPoint ? formatCoord(destinationPoint[0], destinationPoint[1]) : "未设置"}</div>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-1.5">
+              <button type="button" onClick={() => setPickTarget("origin")} className={`rounded-lg px-2 py-1 text-[10px] font-bold transition-all ${pickTarget === "origin" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选 O</button>
+              <button type="button" onClick={() => setPickTarget("destination")} className={`rounded-lg px-2 py-1 text-[10px] font-bold transition-all ${pickTarget === "destination" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选 D</button>
+              <button type="button" onClick={clearInputs} className="rounded-lg border border-blue-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 transition-all">清空</button>
+            </div>
           </div>
         </section>
 
         {!mapFullscreen && (
-          <aside className="space-y-3 lg:h-[calc(100vh-212px)] lg:overflow-hidden">
-            <div className="space-y-3 lg:h-full lg:overflow-y-auto lg:pr-1">
+          <aside className="space-y-2.5 lg:h-[calc(100vh-212px)] lg:overflow-hidden">
+            <div className="space-y-2.5 lg:h-full lg:overflow-y-auto lg:pr-1">
               <SectionCard
                 title="筛选与交互"
                 open={filterOpen}
                 onToggle={() => setFilterOpen((v) => !v)}
                 rightNode={<span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-brand-700">{api.fmtNumber(visibleRoutes.length)} 条</span>}
               >
-                <div className="space-y-2">
-                  <input value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)} className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm" placeholder="搜索起点、终点或分类" />
+                <div className="space-y-3">
+                  <input value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)} className="modern-input w-full rounded-xl px-3.5 py-2 text-xs" placeholder="搜索起点、终点或分类" />
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/50 px-2 py-1.5 text-xs font-semibold text-slate-700">
-                      <input type="checkbox" checked={showOnlyMine} onChange={(e) => setShowOnlyMine(e.target.checked)} />仅看我的线路
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3">
+                    <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50/50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition-all hover:bg-blue-100/50">
+                      <input type="checkbox" checked={showOnlyMine} onChange={(e) => setShowOnlyMine(e.target.checked)} className="h-4 w-4" />仅看我的线路
                     </label>
-                    <select value={routeCategoryFilter} onChange={(e) => setRouteCategoryFilter(e.target.value)} className="rounded-lg border border-blue-200 px-2 py-1.5 text-xs">
+                    <select value={routeCategoryFilter} onChange={(e) => setRouteCategoryFilter(e.target.value)} className="modern-input rounded-xl px-3.5 py-1.5 text-xs">
                       <option value="all">全部分类</option>
                       {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                     </select>
                   </div>
 
-                  <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-3">
                     <div className="mb-2 text-xs font-bold text-slate-600">坐标输入模式</div>
-                    <div className="grid grid-cols-2 gap-1 rounded-lg bg-blue-100/70 p-1">
-                      <button type="button" onClick={() => { setCoordMode("decimal"); syncModeValues("decimal"); }} className={`rounded-md px-2 py-1.5 text-xs font-bold ${coordMode === "decimal" ? "bg-white text-brand-700" : "text-slate-500"}`}>十进制度</button>
-                      <button type="button" onClick={() => { setCoordMode("dms"); syncModeValues("dms"); }} className={`rounded-md px-2 py-1.5 text-xs font-bold ${coordMode === "dms" ? "bg-white text-brand-700" : "text-slate-500"}`}>度分秒</button>
+                    <div className="grid grid-cols-2 gap-2 rounded-xl bg-blue-100/70 p-1.5">
+                      <button type="button" onClick={() => { setCoordMode("decimal"); syncModeValues("decimal"); }} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${coordMode === "decimal" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:bg-white/50"}`}>十进制度</button>
+                      <button type="button" onClick={() => { setCoordMode("dms"); syncModeValues("dms"); }} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${coordMode === "dms" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:bg-white/50"}`}>度分秒</button>
                     </div>
-                    <div className="mt-2 text-xs font-bold text-slate-600">输入坐标系</div>
-                    <div className="mt-1 grid grid-cols-2 gap-1 rounded-lg bg-blue-100/70 p-1">
-                      <button type="button" onClick={() => switchInputCoordSystem("wgs84")} className={`rounded-md px-2 py-1.5 text-xs font-bold ${inputCoordSystem === "wgs84" ? "bg-white text-brand-700" : "text-slate-500"}`}>WGS84</button>
-                      <button type="button" onClick={() => switchInputCoordSystem("gcj02")} className={`rounded-md px-2 py-1.5 text-xs font-bold ${inputCoordSystem === "gcj02" ? "bg-white text-brand-700" : "text-slate-500"}`}>GCJ-02</button>
+                    <div className="mt-3 mb-2 text-xs font-bold text-slate-600">输入坐标系</div>
+                    <div className="grid grid-cols-2 gap-2 rounded-xl bg-blue-100/70 p-1.5">
+                      <button type="button" onClick={() => switchInputCoordSystem("wgs84")} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${inputCoordSystem === "wgs84" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:bg-white/50"}`}>WGS84</button>
+                      <button type="button" onClick={() => switchInputCoordSystem("gcj02")} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${inputCoordSystem === "gcj02" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:bg-white/50"}`}>GCJ-02</button>
                     </div>
-                    <div className="mt-1 text-[11px] font-semibold text-slate-500">内部存储与地图展示均使用 WGS84。</div>
+                    <div className="mt-2 text-xs font-semibold text-slate-500">内部存储与地图展示均使用 WGS84。</div>
                   </div>
 
-                  <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
-                    <div className="mb-2 text-xs font-bold text-slate-600">快捷位置（杭州师范大学）</div>
-                    <div className="space-y-2">
-                      {campusShortcuts.map((campus) => (
-                        <CampusShortcutCard
-                          key={campus.key}
-                          campus={campus}
-                          onPickOrigin={() => applyCampusShortcut(campus, "origin")}
-                          onPickDestination={() => applyCampusShortcut(campus, "destination")}
-                          onLocate={() => {
-                            if (!mapRef.current) return;
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-3">
+                    <div className="mb-2.5 text-xs font-bold text-slate-600">快捷跳转（杭州师范大学）</div>
+                    <div className="space-y-2.5">
+                      <select
+                        value={selectedCampus?.key || ""}
+                        onChange={(e) => setSelectedCampusKey(e.target.value)}
+                        className="modern-input w-full rounded-xl px-3.5 py-2 text-xs"
+                      >
+                        {campusShortcuts.map((campus) => (
+                          <option key={campus.key} value={campus.key}>
+                            {campus.name}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedCampus && (
+                        <div className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+                          WGS84：{formatCoord(selectedCampus.lat_wgs84 ?? selectedCampus.lat, selectedCampus.lon_wgs84 ?? selectedCampus.lon)}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 gap-2">
+                        <button
+                          type="button"
+                          disabled={!selectedCampus}
+                          onClick={() => {
+                            if (!mapRef.current || !selectedCampus) return;
                             mapRef.current.setView(
-                              [Number.isFinite(campus.lat_wgs84) ? campus.lat_wgs84 : campus.lat, Number.isFinite(campus.lon_wgs84) ? campus.lon_wgs84 : campus.lon],
+                              [Number.isFinite(selectedCampus.lat_wgs84) ? selectedCampus.lat_wgs84 : selectedCampus.lat, Number.isFinite(selectedCampus.lon_wgs84) ? selectedCampus.lon_wgs84 : selectedCampus.lon],
                               Math.max(mapRef.current.getZoom(), 14),
                               { animate: true }
                             );
                           }}
-                        />
-                      ))}
+                          className="rounded-xl border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          跳转到该校区
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => setPickTarget("origin")} className={`rounded-lg px-2 py-2 text-xs font-bold ${pickTarget === "origin" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选起点 O</button>
-                    <button type="button" onClick={() => setPickTarget("destination")} className={`rounded-lg px-2 py-2 text-xs font-bold ${pickTarget === "destination" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选终点 D</button>
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveEndpoint("origin");
+                        setPickTarget("origin");
+                      }}
+                      className={`rounded-xl px-3 py-2 text-xs font-bold transition-all ${pickTarget === "origin" ? "bg-brand-600 text-white shadow-md shadow-brand-500/30" : "border border-blue-200 bg-white text-brand-700 hover:bg-slate-50"}`}
+                    >
+                      点选起点 O
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveEndpoint("destination");
+                        setPickTarget("destination");
+                      }}
+                      className={`rounded-xl px-3 py-2 text-xs font-bold transition-all ${pickTarget === "destination" ? "bg-brand-600 text-white shadow-md shadow-brand-500/30" : "border border-blue-200 bg-white text-brand-700 hover:bg-slate-50"}`}
+                    >
+                      点选终点 D
+                    </button>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
-                    <button type="button" onClick={syncInputPointsToMap} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">输入同步地图</button>
-                    <button type="button" onClick={swapEndpoints} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">交换 O/D</button>
-                    <button type="button" onClick={clearInputs} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">清空输入</button>
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
+                    <button type="button" onClick={syncInputPointsToMap} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">输入同步地图</button>
+                    <button type="button" onClick={swapEndpoints} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">交换 O/D</button>
+                    <button type="button" onClick={clearInputs} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">清空输入</button>
                   </div>
                 </div>
               </SectionCard>
               <SectionCard title="录入 OD 线路" open={entryOpen} onToggle={() => setEntryOpen((v) => !v)}>
-                <form onSubmit={submitRoute} className="space-y-2">
-                  <EndpointEditor title="起点 O" endpoint={originInput} setEndpoint={setOriginInput} coordMode={coordMode} />
-                  <EndpointEditor title="终点 D" endpoint={destinationInput} setEndpoint={setDestinationInput} coordMode={coordMode} />
+                <form onSubmit={submitRoute} className="space-y-3">
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-2">
+                    <div className="grid grid-cols-2 gap-2 rounded-xl bg-blue-100/70 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setActiveEndpoint("origin")}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${activeEndpoint === "origin" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:bg-white/50"}`}
+                      >
+                        编辑起点 O
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveEndpoint("destination")}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${activeEndpoint === "destination" ? "bg-white text-brand-700 shadow-sm" : "text-slate-500 hover:bg-white/50"}`}
+                      >
+                        编辑终点 D
+                      </button>
+                    </div>
+                  </div>
 
-                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-blue-100 bg-white p-2">
-                    <select value={routeCategory} onChange={(e) => setRouteCategory(e.target.value)} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm">
+                  <EndpointEditor title={activeEndpointTitle} endpoint={activeEndpointInput} setEndpoint={setActiveEndpointInput} coordMode={coordMode} />
+
+                  <div className="rounded-xl border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-slate-600">
+                    O：{originInput.name || "未命名"} | D：{destinationInput.name || "未命名"}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5 rounded-2xl border border-blue-100 bg-white p-3">
+                    <select value={routeCategory} onChange={(e) => setRouteCategory(e.target.value)} className="modern-input rounded-xl px-3.5 py-2 text-xs">
                       {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                     </select>
-                    <button disabled={submitting} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60">{submitting ? "提交中..." : "保存线路"}</button>
-                    <button type="button" onClick={generateOdMap} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700">生成 OD 图</button>
-                    <button type="button" disabled={exportingPoster} onClick={() => exportOdPoster("svg")} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700 disabled:opacity-60">导出 SVG</button>
-                    <button type="button" disabled={exportingPoster} onClick={() => exportOdPoster("png")} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出 PNG"}</button>
+                    <button disabled={submitting} className="btn-primary rounded-xl px-3.5 py-2 text-xs font-bold disabled:opacity-60">{submitting ? "提交中..." : "保存线路"}</button>
+                    <button type="button" onClick={generateOdMap} className="col-span-2 rounded-xl border border-blue-200 bg-white px-3.5 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">更新地图展示</button>
                   </div>
 
                   <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-2 py-2 text-[11px] font-semibold text-slate-600">
@@ -1048,16 +1068,16 @@ function ExplorerApp() {
               <SectionCard title="最近线路" open={recentOpen} onToggle={() => setRecentOpen((v) => !v)}>
                 <div className="max-h-[280px] space-y-2 overflow-auto pr-1 lg:max-h-[34vh]">
                   {visibleRoutes.slice(0, isCompactScreen ? 8 : 16).map((route) => (
-                    <div key={route.id} className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
-                      <div className="truncate text-sm font-bold text-slate-700">{route.origin_name} -&gt; {route.destination_name}</div>
-                      <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
-                      <div className="mt-1 flex items-center justify-end gap-2">
+                    <div key={route.id} className="rounded-2xl border border-blue-100 bg-blue-50/40 p-3 shadow-sm transition-all hover:bg-white hover:shadow-md">
+                      <div className="truncate text-sm font-bold text-slate-800">{route.origin_name} -&gt; {route.destination_name}</div>
+                      <div className="mt-1 text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
+                      <div className="mt-2.5 flex items-center justify-end gap-2">
                         <button type="button" onClick={() => {
                           if (!mapRef.current) return;
                           mapRef.current.fitBounds([[route.origin_lat, route.origin_lon], [route.destination_lat, route.destination_lon]], { padding: [42, 42] });
-                        }} className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-brand-700">定位</button>
+                        }} className="rounded-xl border border-blue-200 bg-white px-3 py-1.5 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">定位</button>
                         {Number(route.user_id) === Number(me?.id) && (
-                          <button type="button" onClick={() => deleteRoute(route.id)} className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600">删除</button>
+                          <button type="button" onClick={() => deleteRoute(route.id)} className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-600 transition-all hover:bg-rose-100">删除</button>
                         )}
                       </div>
                     </div>

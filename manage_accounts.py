@@ -13,7 +13,7 @@ from werkzeug.security import generate_password_hash
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "webgis.db")
 DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
-PASSWORD_MIN_LENGTH = 8
+PASSWORD_MIN_LENGTH = 6
 PASSWORD_MAX_LENGTH = 64
 LOCAL_DEFAULT_AVATAR = "/static/images/avatar-default.svg"
 SCHEMA_VERSION = "20260228_v2"
@@ -480,19 +480,6 @@ def cmd_update(args):
         db.close()
 
 
-def cmd_set_role(args):
-    ns = argparse.Namespace(
-        id=args.id,
-        username=args.username,
-        name=None,
-        username_new=None,
-        status=None,
-        user_type=args.user_type,
-        force_change=None,
-        unlock=False,
-        json=args.json,
-    )
-    return cmd_update(ns)
 
 
 def cmd_reset_password(args):
@@ -694,11 +681,7 @@ def build_parser():
     p_update.add_argument("--json", action="store_true", help="以 JSON 输出")
     p_update.set_defaults(func=cmd_update, force_change=None)
 
-    p_role = sub.add_parser("set-role", help="调整账户类型（兼容旧命令）")
-    add_user_selector_arguments(p_role)
-    p_role.add_argument("--user-type", choices=["student", "admin"], required=True, help="目标类型")
-    p_role.add_argument("--json", action="store_true", help="以 JSON 输出")
-    p_role.set_defaults(func=cmd_set_role)
+
 
     p_reset = sub.add_parser("reset-password", help="重置密码")
     add_user_selector_arguments(p_reset)

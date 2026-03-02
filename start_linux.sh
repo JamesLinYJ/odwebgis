@@ -42,6 +42,31 @@ fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
+if [[ -z "${WEBGIS_SECRET_KEY:-}" ]]; then
+  GENERATED_SECRET="$(python - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+)"
+  export WEBGIS_SECRET_KEY="$GENERATED_SECRET"
+
+  if [[ -f "$ENV_FILE" ]]; then
+    if grep -q '^WEBGIS_SECRET_KEY=' "$ENV_FILE"; then
+      sed -i "s|^WEBGIS_SECRET_KEY=.*|WEBGIS_SECRET_KEY=\"$GENERATED_SECRET\"|" "$ENV_FILE"
+    else
+      printf '\nWEBGIS_SECRET_KEY="%s"\n' "$GENERATED_SECRET" >> "$ENV_FILE"
+    fi
+  else
+    cat > "$ENV_FILE" <<EOF
+WEBGIS_HOST="$HOST"
+WEBGIS_PORT="$PORT"
+WEBGIS_SECRET_KEY="$GENERATED_SECRET"
+EOF
+  fi
+  chmod 600 "$ENV_FILE" 2>/dev/null || true
+  echo "[INFO] WEBGIS_SECRET_KEY missing, generated and saved to $ENV_FILE"
+fi
+
 if [[ -f "$PID_FILE" ]]; then
   OLD_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
   if [[ -n "${OLD_PID:-}" ]] && kill -0 "$OLD_PID" 2>/dev/null; then

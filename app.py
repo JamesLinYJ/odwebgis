@@ -1,4 +1,5 @@
 ﻿import csv
+import gzip as gzip_mod
 import io
 import os
 import sqlite3
@@ -6,6 +7,7 @@ import hashlib
 import hmac
 import math
 import time
+import uuid
 import urllib.error
 import urllib.request
 from collections import deque
@@ -21,7 +23,7 @@ DB_PATH = os.path.join(BASE_DIR, "webgis.db")
 DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 MAX_FAILED_LOGIN_ATTEMPTS = 5
 LOGIN_LOCK_MINUTES = 15
-PASSWORD_MIN_LENGTH = 8
+PASSWORD_MIN_LENGTH = 6
 PASSWORD_MAX_LENGTH = 64
 LOCAL_DEFAULT_AVATAR = "/static/images/avatar-default.svg"
 SYSTEM_ADMIN_ACCOUNT_ENV = "WEBGIS_SYSTEM_ADMIN_ACCOUNT"
@@ -31,6 +33,8 @@ TIANDITU_API_KEY_ENV = "TIANDITU_API_KEY"
 TIANDITU_API_KEY_FILE = os.path.join(BASE_DIR, ".tianditu_key")
 TILE_RATE_LIMIT_PER_MIN = 900
 TILE_RATE_WINDOW_SECONDS = 60
+TILE_CACHE_DIR = os.path.join(BASE_DIR, ".tile_cache")
+TILE_CACHE_TTL_SECONDS = 86400
 SCHEMA_VERSION = "20260228_v2"
 COORD_SYSTEM_WGS84 = "wgs84"
 COORD_SYSTEM_GCJ02 = "gcj02"
@@ -141,6 +145,66 @@ def get_tile_rate_limit_per_min() -> int:
     return max(60, min(5000, value))
 
 
+def get_tile_cache_ttl_seconds() -> int:
+    raw = (os.environ.get("WEBGIS_TILE_CACHE_TTL_SECONDS") or "").strip()
+    if not raw:
+        return TILE_CACHE_TTL_SECONDS
+    try:
+        value = int(raw)
+    except ValueError:
+        return TILE_CACHE_TTL_SECONDS
+    return max(0, min(7 * 24 * 3600, value))
+
+
+def tile_cache_enabled() -> bool:
+    return get_tile_cache_ttl_seconds() > 0
+
+
+def tile_cache_paths(layer: str, z: int, x: int, y: int) -> tuple[str, str]:
+    folder = os.path.join(TILE_CACHE_DIR, layer, str(z), str(x))
+    base = os.path.join(folder, str(y))
+    return f"{base}.tile", f"{base}.meta"
+
+
+def read_tile_cache(layer: str, z: int, x: int, y: int) -> tuple[bytes, str] | None:
+    if not tile_cache_enabled():
+        return None
+    data_path, meta_path = tile_cache_paths(layer, z, x, y)
+    try:
+        stat = os.stat(data_path)
+    except OSError:
+        return None
+    ttl = get_tile_cache_ttl_seconds()
+    if ttl > 0 and (time.time() - stat.st_mtime) > ttl:
+        return None
+    try:
+        with open(data_path, "rb") as fp:
+            data = fp.read()
+        content_type = "image/png"
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as fp:
+                content_type = (fp.readline() or "").strip() or "image/png"
+        return data, content_type
+    except OSError:
+        return None
+
+
+def write_tile_cache(layer: str, z: int, x: int, y: int, data: bytes, content_type: str) -> None:
+    if not tile_cache_enabled():
+        return
+    data_path, meta_path = tile_cache_paths(layer, z, x, y)
+    folder = os.path.dirname(data_path)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(data_path, "wb") as fp:
+            fp.write(data)
+        with open(meta_path, "w", encoding="utf-8") as fp:
+            fp.write(content_type or "image/png")
+    except OSError:
+        # best-effort cache; ignore disk write failures
+        return
+
+
 def consume_tile_quota(identity: str) -> tuple[bool, int]:
     now_ts = time.time()
     limit = get_tile_rate_limit_per_min()
@@ -211,7 +275,14 @@ def is_system_admin_user(user: sqlite3.Row | dict[str, Any] | None) -> bool:
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    app.secret_key = os.environ.get("WEBGIS_SECRET_KEY", "webgis-dev-secret-change-me")
+    _secret_key = os.environ.get("WEBGIS_SECRET_KEY", "").strip()
+    if not _secret_key:
+        _secret_key = "webgis-dev-secret-change-me"
+        print(
+            "[WARN] 未设置 WEBGIS_SECRET_KEY 环境变量，正在使用内置开发密钥。"
+            "正式部署时请务必设置一个强随机密钥，否则会话可被伪造！"
+        )
+    app.secret_key = _secret_key
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = os.environ.get("WEBGIS_COOKIE_SECURE", "0") == "1"
@@ -233,6 +304,51 @@ def create_app() -> Flask:
         db = g.pop("db", None)
         if db is not None:
             db.close()
+
+    @app.after_request
+    def set_security_headers(response: Response) -> Response:
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+        # Prevent caching of API responses that may contain sensitive data
+        if request.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        # Long-lived cache for static assets (versioned via ?v= query string)
+        elif request.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+    @app.after_request
+    def gzip_response(response: Response) -> Response:
+        # Skip if client doesn't accept gzip, response is already encoded,
+        # status is not 200, or content is too small to benefit.
+        if (
+            "gzip" not in request.headers.get("Accept-Encoding", "")
+            or response.status_code != 200
+            or response.direct_passthrough
+            or "Content-Encoding" in response.headers
+            or response.content_length is not None and response.content_length < 256
+        ):
+            return response
+        content_type = response.content_type or ""
+        compressible = any(
+            ct in content_type
+            for ct in ("text/html", "text/css", "application/javascript", "text/javascript", "application/json", "image/svg+xml")
+        )
+        if not compressible:
+            return response
+        data = response.get_data()
+        if len(data) < 256:
+            return response
+        compressed = gzip_mod.compress(data, compresslevel=6)
+        response.set_data(compressed)
+        response.headers["Content-Encoding"] = "gzip"
+        response.headers["Content-Length"] = len(compressed)
+        response.headers.setdefault("Vary", "Accept-Encoding")
+        return response
 
     def session_user() -> sqlite3.Row | dict[str, Any] | None:
         if session.get("is_system_admin"):
@@ -403,11 +519,7 @@ def create_app() -> Flask:
     def auth_register() -> Any:
         payload = request.get_json(silent=True) or {}
         name = (payload.get("name") or "").strip()
-        username = (
-            payload.get("username")
-            or payload.get("account")
-            or ""
-        ).strip()
+        username = (payload.get("username") or "").strip()
         password = (payload.get("password") or "").strip()
 
         if not name:
@@ -477,10 +589,9 @@ def create_app() -> Flask:
 
         db = get_db()
         now = utc_now_text()
-        stamp = int(time.time())
         username = None
-        for idx in range(1000):
-            candidate = f"guest{stamp % 100000000:08d}" if idx == 0 else f"guest{stamp % 100000000:08d}{idx:03d}"
+        for _ in range(20):
+            candidate = f"g_{uuid.uuid4().hex[:10]}"
             exists = db.execute(
                 "SELECT id FROM users WHERE UPPER(COALESCE(username, '')) = UPPER(?)",
                 (candidate,),
@@ -489,7 +600,7 @@ def create_app() -> Flask:
                 username = candidate
                 break
         if not username:
-            username = f"guest{int(time.time() * 1000) % 1000000000000}"
+            username = f"g_{uuid.uuid4().hex[:16]}"
 
         guest_secret = hashlib.sha256(f"guest:{name}:{time.time_ns()}".encode("utf-8")).hexdigest()
         cur = db.execute(
@@ -523,11 +634,7 @@ def create_app() -> Flask:
     @app.post("/api/auth/login")
     def auth_login() -> Any:
         payload = request.get_json(silent=True) or {}
-        account = (
-            payload.get("account")
-            or payload.get("username")
-            or ""
-        ).strip()
+        account = (payload.get("username") or "").strip()
         password = (payload.get("password") or "").strip()
 
         if not account or not password:
@@ -576,9 +683,6 @@ def create_app() -> Flask:
         hashed = row["password_hash"] or ""
         normalized_secret = normalize_password_secret(password)
         password_ok = bool(hashed) and check_password_hash(hashed, normalized_secret)
-        # 兼容早期未做前端加密时的口令校验
-        if not password_ok and hashed:
-            password_ok = check_password_hash(hashed, password)
         if not password_ok:
             failed_count = int(row["failed_login_count"] or 0) + 1
             next_lock_until = None
@@ -617,7 +721,6 @@ def create_app() -> Flask:
         return jsonify(
             {
                 "ok": True,
-                "user_id": uid,
                 "redirect": redirect_path,
                 "must_change_password": bool(int(row["force_password_change"] or 0)),
             }
@@ -625,8 +728,8 @@ def create_app() -> Flask:
 
     @app.post("/api/auth/logout")
     def auth_logout() -> Any:
-        session.pop("is_system_admin", None)
-        user_id = session.pop("user_id", None)
+        user_id = session.get("user_id")
+        session.clear()
         if user_id:
             db = get_db()
             db.execute(
@@ -644,6 +747,10 @@ def create_app() -> Flask:
         if is_system_admin_user(user):
             return jsonify({"ok": False, "message": "系统后台账号密码由部署环境统一管理"}), 400
 
+        # Guest users have no real password and cannot change one
+        if (user["username"] or "").startswith("g_"):
+            return jsonify({"ok": False, "message": "访客账户不支持修改密码"}), 403
+
         payload = request.get_json(silent=True) or {}
         old_password = (payload.get("old_password") or "").strip()
         new_password = (payload.get("new_password") or "").strip()
@@ -659,9 +766,6 @@ def create_app() -> Flask:
         hashed = user["password_hash"] or ""
         normalized_old_secret = normalize_password_secret(old_password)
         password_ok = bool(hashed) and check_password_hash(hashed, normalized_old_secret)
-        # 兼容早期未做前端加密时的旧口令校验
-        if not password_ok and hashed:
-            password_ok = check_password_hash(hashed, old_password)
         if not password_ok:
             return jsonify({"ok": False, "message": "旧密码错误"}), 400
 
@@ -679,6 +783,13 @@ def create_app() -> Flask:
             ),
         )
         db.commit()
+
+        # Regenerate session to invalidate old cookies
+        uid = int(user["id"])
+        session.clear()
+        session["user_id"] = uid
+        session.permanent = True
+
         return jsonify({"ok": True})
 
     @app.get("/api/routes")
@@ -924,10 +1035,6 @@ def create_app() -> Flask:
         sql.append("GROUP BY u.id ORDER BY route_count DESC, datetime(COALESCE(u.last_active_at, u.created_at)) DESC")
         rows = db.execute("\n".join(sql), params).fetchall()
         return jsonify({"ok": True, "users": [user_row_to_dict(r) for r in rows]})
-
-    @app.post("/api/students/register")
-    def register_student() -> Any:
-        return auth_register()
 
     @app.get("/api/users/<int:user_id>/summary")
     def user_summary(user_id: int) -> Any:
@@ -1190,11 +1297,7 @@ def create_app() -> Flask:
 
         payload = request.get_json(silent=True) or {}
         name = (payload.get("name") or "").strip()
-        account = (
-            payload.get("username")
-            or payload.get("account")
-            or ""
-        ).strip()
+        account = (payload.get("username") or "").strip()
         password = (payload.get("password") or "").strip()
         user_type = (payload.get("user_type") or "student").strip().lower()
 
@@ -1704,6 +1807,7 @@ def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     result["must_change_password"] = bool(int(result.get("force_password_change") or 0))
     result["route_count"] = int(result.get("route_count", 0))
     result["is_system_admin"] = False
+    result["is_guest"] = bool((result.get("username") or "").startswith("g_"))
     return result
 
 
