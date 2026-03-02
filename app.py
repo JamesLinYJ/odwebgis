@@ -4,11 +4,12 @@ import os
 import sqlite3
 import hashlib
 import hmac
+import math
 import time
 import urllib.error
 import urllib.request
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -31,11 +32,19 @@ TIANDITU_API_KEY_FILE = os.path.join(BASE_DIR, ".tianditu_key")
 TILE_RATE_LIMIT_PER_MIN = 900
 TILE_RATE_WINDOW_SECONDS = 60
 SCHEMA_VERSION = "20260228_v2"
+COORD_SYSTEM_WGS84 = "wgs84"
+COORD_SYSTEM_GCJ02 = "gcj02"
+GCJ_A = 6378245.0
+GCJ_EE = 0.00669342162296594323
 _tile_rate_buckets: dict[str, deque[float]] = {}
 
 
 def utc_now_text() -> str:
-    return datetime.utcnow().strftime(DATETIME_FMT)
+    return utc_now().strftime(DATETIME_FMT)
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def parse_datetime_text(value: str | None) -> datetime | None:
@@ -457,6 +466,60 @@ def create_app() -> Flask:
         db.commit()
         return jsonify({"ok": True, "user_id": new_id, "redirect": "/"})
 
+    @app.post("/api/auth/guest-login")
+    def auth_guest_login() -> Any:
+        payload = request.get_json(silent=True) or {}
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return jsonify({"ok": False, "message": "请输入姓名"}), 400
+        if len(name) > 32:
+            return jsonify({"ok": False, "message": "姓名长度不能超过 32"}), 400
+
+        db = get_db()
+        now = utc_now_text()
+        stamp = int(time.time())
+        username = None
+        for idx in range(1000):
+            candidate = f"guest{stamp % 100000000:08d}" if idx == 0 else f"guest{stamp % 100000000:08d}{idx:03d}"
+            exists = db.execute(
+                "SELECT id FROM users WHERE UPPER(COALESCE(username, '')) = UPPER(?)",
+                (candidate,),
+            ).fetchone()
+            if exists is None:
+                username = candidate
+                break
+        if not username:
+            username = f"guest{int(time.time() * 1000) % 1000000000000}"
+
+        guest_secret = hashlib.sha256(f"guest:{name}:{time.time_ns()}".encode("utf-8")).hexdigest()
+        cur = db.execute(
+            """
+            INSERT INTO users(
+                name, username, user_type, status, avatar_url, password_hash, created_at, last_active_at,
+                force_password_change, failed_login_count, lock_until
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                name,
+                username,
+                "student",
+                "online",
+                LOCAL_DEFAULT_AVATAR,
+                generate_password_hash(guest_secret),
+                now,
+                now,
+                0,
+                0,
+                None,
+            ),
+        )
+        db.commit()
+
+        session.clear()
+        session["user_id"] = int(cur.lastrowid)
+        session.permanent = True
+        return jsonify({"ok": True, "user_id": int(cur.lastrowid), "redirect": "/"})
+
     @app.post("/api/auth/login")
     def auth_login() -> Any:
         payload = request.get_json(silent=True) or {}
@@ -506,8 +569,8 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "message": "用户名或密码错误"}), 401
 
         lock_until = parse_datetime_text(row["lock_until"])
-        if lock_until is not None and lock_until > datetime.utcnow():
-            remain_minutes = max(1, int((lock_until - datetime.utcnow()).total_seconds() // 60) + 1)
+        if lock_until is not None and lock_until > utc_now():
+            remain_minutes = max(1, int((lock_until - utc_now()).total_seconds() // 60) + 1)
             return jsonify({"ok": False, "message": f"登录失败次数过多，请 {remain_minutes} 分钟后再试"}), 429
 
         hashed = row["password_hash"] or ""
@@ -522,7 +585,7 @@ def create_app() -> Flask:
             status_code = 401
             message = "用户名或密码错误"
             if failed_count >= MAX_FAILED_LOGIN_ATTEMPTS:
-                next_lock_until = (datetime.utcnow() + timedelta(minutes=LOGIN_LOCK_MINUTES)).strftime(DATETIME_FMT)
+                next_lock_until = (utc_now() + timedelta(minutes=LOGIN_LOCK_MINUTES)).strftime(DATETIME_FMT)
                 failed_count = 0
                 status_code = 429
                 message = f"登录失败次数过多，请 {LOGIN_LOCK_MINUTES} 分钟后再试"
@@ -765,7 +828,7 @@ def create_app() -> Flask:
     def download_template() -> Any:
         content = (
             "origin_code,origin_name,origin_lat,origin_lon,destination_code,destination_name,"
-            "destination_lat,destination_lon,category,user_id\n"
+            "destination_lat,destination_lon,category,user_id,coord_system,origin_coord_system,destination_coord_system\n"
         ).encode("utf-8-sig")
         return send_file(
             io.BytesIO(content),
@@ -780,7 +843,7 @@ def create_app() -> Flask:
         rows = db.execute(
             "SELECT code, name, region, lat, lon FROM nodes ORDER BY code ASC"
         ).fetchall()
-        return jsonify({"ok": True, "nodes": [dict(r) for r in rows]})
+        return jsonify({"ok": True, "nodes": [node_row_to_dict(r) for r in rows]})
 
     @app.post("/api/nodes")
     def create_node() -> Any:
@@ -788,13 +851,22 @@ def create_app() -> Flask:
         code = (payload.get("code") or "").strip().upper()
         name = (payload.get("name") or "").strip()
         region = (payload.get("region") or "").strip() or "未分组"
-        lat = to_float(payload.get("lat"), "lat")
-        lon = to_float(payload.get("lon"), "lon")
+        try:
+            coord_system = normalize_coord_system(payload.get("coord_system"), COORD_SYSTEM_WGS84)
+        except ValueError as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+        try:
+            input_lat = to_float(payload.get("lat"), "lat")
+            input_lon = to_float(payload.get("lon"), "lon")
+        except ValueError as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
 
         if not code:
             return jsonify({"ok": False, "message": "code 不能为空"}), 400
         if not name:
             return jsonify({"ok": False, "message": "name 不能为空"}), 400
+        validate_lat_lon(input_lat, input_lon)
+        lat, lon = to_wgs84(input_lat, input_lon, coord_system)
         validate_lat_lon(lat, lon)
 
         db = get_db()
@@ -1343,6 +1415,72 @@ def to_optional_float(value: Any) -> float | None:
         return None
 
 
+def normalize_coord_system(value: Any, default: str = COORD_SYSTEM_WGS84) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return default
+    compact = text.replace("-", "").replace("_", "")
+    if compact in {"wgs84", "wgs"}:
+        return COORD_SYSTEM_WGS84
+    if compact in {"gcj02", "gcj", "mars"} or text in {"火星坐标", "火星坐标系"}:
+        return COORD_SYSTEM_GCJ02
+    raise ValueError("coord_system 仅支持 wgs84 或 gcj02")
+
+
+def out_of_china(lat: float, lon: float) -> bool:
+    return lon < 72.004 or lon > 137.8347 or lat < 0.8293 or lat > 55.8271
+
+
+def _transform_lat(x: float, y: float) -> float:
+    ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
+    ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
+    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320 * math.sin(y * math.pi / 30.0)) * 2.0 / 3.0
+    return ret
+
+
+def _transform_lon(x: float, y: float) -> float:
+    ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
+    ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
+    ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
+    return ret
+
+
+def wgs84_to_gcj02(lat: float, lon: float) -> tuple[float, float]:
+    if out_of_china(lat, lon):
+        return float(lat), float(lon)
+    d_lat = _transform_lat(lon - 105.0, lat - 35.0)
+    d_lon = _transform_lon(lon - 105.0, lat - 35.0)
+    rad_lat = lat / 180.0 * math.pi
+    magic = math.sin(rad_lat)
+    magic = 1 - GCJ_EE * magic * magic
+    sqrt_magic = math.sqrt(magic)
+    d_lat = (d_lat * 180.0) / ((GCJ_A * (1 - GCJ_EE)) / (magic * sqrt_magic) * math.pi)
+    d_lon = (d_lon * 180.0) / (GCJ_A / sqrt_magic * math.cos(rad_lat) * math.pi)
+    mg_lat = lat + d_lat
+    mg_lon = lon + d_lon
+    return float(mg_lat), float(mg_lon)
+
+
+def gcj02_to_wgs84(lat: float, lon: float) -> tuple[float, float]:
+    if out_of_china(lat, lon):
+        return float(lat), float(lon)
+    wgs_lat = float(lat)
+    wgs_lon = float(lon)
+    for _ in range(2):
+        tmp_lat, tmp_lon = wgs84_to_gcj02(wgs_lat, wgs_lon)
+        wgs_lat -= tmp_lat - lat
+        wgs_lon -= tmp_lon - lon
+    return float(wgs_lat), float(wgs_lon)
+
+
+def to_wgs84(lat: float, lon: float, coord_system: str) -> tuple[float, float]:
+    if coord_system == COORD_SYSTEM_GCJ02:
+        return gcj02_to_wgs84(lat, lon)
+    return float(lat), float(lon)
+
+
 def validate_lat_lon(lat: float, lon: float) -> None:
     if lat < -90 or lat > 90:
         raise ValueError("纬度范围必须在 -90 到 90")
@@ -1357,6 +1495,7 @@ def resolve_endpoint(
     name: str | None,
     lat: float | None,
     lon: float | None,
+    coord_system: str = COORD_SYSTEM_WGS84,
 ) -> dict[str, Any]:
     clean_code = (code or "").strip().upper()
     clean_name = (name or "").strip()
@@ -1374,18 +1513,23 @@ def resolve_endpoint(
             "region": row["region"],
             "lat": float(row["lat"]),
             "lon": float(row["lon"]),
+            "coord_system": COORD_SYSTEM_WGS84,
         }
 
     if lat is None or lon is None:
         raise ValueError(f"{label}需要输入代码或经纬度")
 
     validate_lat_lon(lat, lon)
+    normalized_system = normalize_coord_system(coord_system, COORD_SYSTEM_WGS84)
+    wgs_lat, wgs_lon = to_wgs84(float(lat), float(lon), normalized_system)
+    validate_lat_lon(wgs_lat, wgs_lon)
     return {
         "code": None,
         "name": clean_name or f"{label}手动点",
         "region": "自定义",
-        "lat": float(lat),
-        "lon": float(lon),
+        "lat": float(wgs_lat),
+        "lon": float(wgs_lon),
+        "coord_system": COORD_SYSTEM_WGS84,
     }
 
 
@@ -1423,6 +1567,10 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
     if user_exists is None:
         raise ValueError("user_id 对应用户不存在")
 
+    global_coord_system = normalize_coord_system(payload.get("coord_system"), COORD_SYSTEM_WGS84)
+    origin_coord_system = normalize_coord_system(payload.get("origin_coord_system"), global_coord_system)
+    destination_coord_system = normalize_coord_system(payload.get("destination_coord_system"), global_coord_system)
+
     origin = resolve_endpoint(
         db,
         "起点",
@@ -1430,6 +1578,7 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
         payload.get("origin_name"),
         to_optional_float(payload.get("origin_lat")),
         to_optional_float(payload.get("origin_lon")),
+        origin_coord_system,
     )
     destination = resolve_endpoint(
         db,
@@ -1438,6 +1587,7 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
         payload.get("destination_name"),
         to_optional_float(payload.get("destination_lat")),
         to_optional_float(payload.get("destination_lon")),
+        destination_coord_system,
     )
 
     category = (payload.get("category") or "货运").strip() or "货运"
@@ -1496,8 +1646,43 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
     return int(cur.lastrowid)
 
 
+def node_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    result = dict(row)
+    lat_wgs = float(result.get("lat") or 0.0)
+    lon_wgs = float(result.get("lon") or 0.0)
+    lat_gcj, lon_gcj = wgs84_to_gcj02(lat_wgs, lon_wgs)
+    result["coord_system"] = COORD_SYSTEM_WGS84
+    result["lat"] = lat_wgs
+    result["lon"] = lon_wgs
+    result["lat_wgs84"] = lat_wgs
+    result["lon_wgs84"] = lon_wgs
+    result["lat_gcj02"] = float(lat_gcj)
+    result["lon_gcj02"] = float(lon_gcj)
+    return result
+
+
 def route_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     result = dict(row)
+    origin_lat_wgs = float(result.get("origin_lat") or 0.0)
+    origin_lon_wgs = float(result.get("origin_lon") or 0.0)
+    destination_lat_wgs = float(result.get("destination_lat") or 0.0)
+    destination_lon_wgs = float(result.get("destination_lon") or 0.0)
+    origin_lat_gcj, origin_lon_gcj = wgs84_to_gcj02(origin_lat_wgs, origin_lon_wgs)
+    destination_lat_gcj, destination_lon_gcj = wgs84_to_gcj02(destination_lat_wgs, destination_lon_wgs)
+
+    result["coord_system"] = COORD_SYSTEM_WGS84
+    result["origin_lat"] = origin_lat_wgs
+    result["origin_lon"] = origin_lon_wgs
+    result["destination_lat"] = destination_lat_wgs
+    result["destination_lon"] = destination_lon_wgs
+    result["origin_lat_wgs84"] = origin_lat_wgs
+    result["origin_lon_wgs84"] = origin_lon_wgs
+    result["destination_lat_wgs84"] = destination_lat_wgs
+    result["destination_lon_wgs84"] = destination_lon_wgs
+    result["origin_lat_gcj02"] = float(origin_lat_gcj)
+    result["origin_lon_gcj02"] = float(origin_lon_gcj)
+    result["destination_lat_gcj02"] = float(destination_lat_gcj)
+    result["destination_lon_gcj02"] = float(destination_lon_gcj)
     result["line_label"] = (
         f"{result.get('origin_code') or result.get('origin_name')} -> "
         f"{result.get('destination_code') or result.get('destination_name')}"

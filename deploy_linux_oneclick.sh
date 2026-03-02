@@ -13,6 +13,9 @@ ADMIN_NAME="${WEBGIS_DEFAULT_ADMIN_NAME:-DefaultAdmin}"
 SYSTEM_ADMIN_ACCOUNT="${WEBGIS_SYSTEM_ADMIN_ACCOUNT:-}"
 SYSTEM_ADMIN_PASSWORD="${WEBGIS_SYSTEM_ADMIN_PASSWORD:-}"
 FORCE_CHANGE=0
+AUTO_INSTALL_NODE="${AUTO_INSTALL_NODE:-1}"
+PKG_TIMEOUT_SECONDS="${PKG_TIMEOUT_SECONDS:-240}"
+NPM_TIMEOUT_SECONDS="${NPM_TIMEOUT_SECONDS:-180}"
 MAP_KEY_ARG_PROVIDED=0
 ADMIN_USERNAME_ARG_PROVIDED=0
 ADMIN_PASSWORD_ARG_PROVIDED=0
@@ -30,6 +33,9 @@ Options:
   --admin-name <name>               Default admin display name
   --system-admin-account <account>  Optional system backend account
   --system-admin-password <pass>    Optional system backend password
+  --skip-node-install               Skip Node.js auto-install, use standalone Tailwind binary
+  --pkg-timeout <seconds>           Package manager timeout seconds, default 240
+  --npm-timeout <seconds>           npm install timeout seconds, default 180
   --force-change                    Force default admin to change password on next login
   -h, --help                        Show this help
 
@@ -53,6 +59,9 @@ while [[ $# -gt 0 ]]; do
     --admin-name) ADMIN_NAME="$2"; shift 2 ;;
     --system-admin-account) SYSTEM_ADMIN_ACCOUNT="$2"; shift 2 ;;
     --system-admin-password) SYSTEM_ADMIN_PASSWORD="$2"; shift 2 ;;
+    --skip-node-install) AUTO_INSTALL_NODE=0; shift ;;
+    --pkg-timeout) PKG_TIMEOUT_SECONDS="$2"; shift 2 ;;
+    --npm-timeout) NPM_TIMEOUT_SECONDS="$2"; shift 2 ;;
     --force-change) FORCE_CHANGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "[ERROR] Unknown option: $1"; usage; exit 1 ;;
@@ -156,8 +165,8 @@ PY
 )"
 fi
 
-echo "[INFO] Step 1/6: setup Python + Node.js env"
-./setup_linux.sh
+echo "[INFO] Step 1/6: setup Python env and optional Node.js env"
+AUTO_INSTALL_NODE="$AUTO_INSTALL_NODE" PKG_TIMEOUT_SECONDS="$PKG_TIMEOUT_SECONDS" ./setup_linux.sh
 
 # shellcheck disable=SC1091
 source .venv/bin/activate
@@ -167,7 +176,12 @@ python manage_map_key.py set --key "$MAP_KEY"
 python manage_map_key.py check || true
 
 echo "[INFO] Step 3/6: build Tailwind CSS"
-./build_tailwind.sh
+if command -v npm >/dev/null 2>&1; then
+  NPM_TIMEOUT_SECONDS="$NPM_TIMEOUT_SECONDS" ./build_tailwind.sh
+else
+  echo "[WARN] npm not found, use standalone Tailwind binary."
+  TAILWIND_USE_STANDALONE=1 ./build_tailwind.sh
+fi
 
 echo "[INFO] Step 4/6: write runtime env"
 cat > .env.webgis <<EOF

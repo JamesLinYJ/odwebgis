@@ -36,6 +36,33 @@ function routeBrief(route) {
     return `${route.origin_name} -> ${route.destination_name}`;
 }
 
+function attachMapDecorControls(map) {
+    if (!map || !window.L) return;
+
+    const northControl = L.control({ position: "bottomright" });
+    northControl.onAdd = () => {
+        const container = L.DomUtil.create("div", "leaflet-control leaflet-control-north");
+        container.innerHTML = `
+            <div class="north-indicator" aria-label="指北针" title="北向">
+                <span class="north-indicator-arrow"></span>
+                <span class="north-indicator-text">N</span>
+            </div>
+        `;
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+        return container;
+    };
+    northControl.addTo(map);
+
+    L.control.scale({
+        position: "bottomright",
+        metric: true,
+        imperial: false,
+        maxWidth: 140,
+        updateWhenIdle: true,
+    }).addTo(map);
+}
+
 function AdminApp() {
     const mapHostRef = useRef(null);
     const mapSectionRef = useRef(null);
@@ -69,7 +96,9 @@ function AdminApp() {
     const [baseMapMode, setBaseMapMode] = useState("vector");
     const [mapFullscreen, setMapFullscreen] = useState(false);
     const [exportingPoster, setExportingPoster] = useState(false);
+    const [isCompactScreen, setIsCompactScreen] = useState(false);
     const [filterPanelOpen, setFilterPanelOpen] = useState(true);
+    const layoutAutoInitRef = useRef(false);
     const [accountPanelOpen, setAccountPanelOpen] = useState(true);
     const [accounts, setAccounts] = useState([]);
     const [accountFilter, setAccountFilter] = useState({ q: "", user_type: "all" });
@@ -114,12 +143,8 @@ function AdminApp() {
     }, [allRoutes, selectedUserId]);
 
     const selectedUserIdSet = useMemo(() => {
-        const ids = (selectedUserIds || []).map((id) => Number(id));
-        if (selectedUserId && !ids.some((id) => Number(id) === Number(selectedUserId))) {
-            ids.push(Number(selectedUserId));
-        }
-        return new Set(ids);
-    }, [selectedUserIds, selectedUserId]);
+        return new Set((selectedUserIds || []).map((id) => Number(id)));
+    }, [selectedUserIds]);
 
     const explicitSelectedUserIdSet = useMemo(() => {
         return new Set((selectedUserIds || []).map((id) => Number(id)));
@@ -249,7 +274,9 @@ function AdminApp() {
         }
         setSelectedUserIds((prev) => {
             const next = (prev || []).filter((id) => list.some((u) => Number(u.id) === Number(id)));
-            return next;
+            if (next.length > 0) return next;
+            const fallback = list.find((u) => Number(u.id) === Number(selectedUserId)) || list[0];
+            return fallback ? [Number(fallback.id)] : [];
         });
     }
 
@@ -306,6 +333,20 @@ function AdminApp() {
     }, []);
 
     useEffect(() => {
+        const updateLayout = () => {
+            const compact = window.matchMedia("(max-width: 1536px)").matches;
+            setIsCompactScreen(compact);
+            if (!layoutAutoInitRef.current) {
+                setFilterPanelOpen(!compact);
+                layoutAutoInitRef.current = true;
+            }
+        };
+        updateLayout();
+        window.addEventListener("resize", updateLayout);
+        return () => window.removeEventListener("resize", updateLayout);
+    }, []);
+
+    useEffect(() => {
         const timer = setTimeout(() => {
             loadUsers().catch((err) => api.notify(err.message || "加载学生失败", true));
         }, 250);
@@ -313,9 +354,31 @@ function AdminApp() {
     }, [filters]);
 
     useEffect(() => {
-        if (!selectedUserId) return;
+        if (!selectedUserId) {
+            setSelectedUser(null);
+            setSelectedUserRoutes([]);
+            setCategories([]);
+            return;
+        }
         loadSelectedSummary(selectedUserId).catch((err) => api.notify(err.message || "加载学生摘要失败", true));
     }, [selectedUserId]);
+
+    // Keep route checkbox selections aligned with the currently selected student.
+    useEffect(() => {
+        if (!selectedUserId) {
+            setSelectedRouteIds([]);
+            return;
+        }
+        const allowed = new Set(selectedStudentRoutesFromAll.map((r) => String(r.id)));
+        setSelectedRouteIds((prev) => (prev || []).filter((id) => allowed.has(String(id))));
+    }, [selectedUserId, selectedStudentRoutesFromAll]);
+
+    // If there is no checked student, disable "only selected students" mode to avoid empty-state confusion.
+    useEffect(() => {
+        if (onlySelectedStudent && selectedUserIds.length === 0) {
+            setOnlySelectedStudent(false);
+        }
+    }, [onlySelectedStudent, selectedUserIds]);
 
     useEffect(() => {
         if (!studentContextMenu.open) return;
@@ -370,6 +433,7 @@ function AdminApp() {
         cva.addTo(map);
         baseTileLayersRef.current = { vec, cva, img, cia };
         map.fitBounds(chinaBounds, { padding: [18, 18] });
+        attachMapDecorControls(map);
 
         mapRef.current = map;
         routeLayerRef.current = L.layerGroup().addTo(map);
@@ -462,10 +526,10 @@ function AdminApp() {
 
             line.bindPopup(
                 `<div style="min-width:220px">` +
-                    `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
-                    `录入用户：${studentName}${username ? ` (${username})` : ""}<br/>` +
-                    `分类：${route.category}<br/>` +
-                    `时间：${api.fmtTime(route.created_at)}` +
+                `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
+                `录入用户：${studentName}${username ? ` (${username})` : ""}<br/>` +
+                `分类：${route.category}<br/>` +
+                `时间：${api.fmtTime(route.created_at)}` +
                 `</div>`
             );
 
@@ -558,30 +622,43 @@ function AdminApp() {
     function handleStudentClick(e, user) {
         const id = Number(user.id);
         if (e.ctrlKey || e.metaKey) {
-            setSelectedUserId(id);
             setSelectedUserIds((prev) => {
                 const exists = (prev || []).some((v) => Number(v) === id);
                 if (exists) {
                     const next = (prev || []).filter((v) => Number(v) !== id);
+                    if (Number(selectedUserId) === id) {
+                        setSelectedUserId(next.length > 0 ? Number(next[0]) : null);
+                    }
                     return next;
                 }
+                setSelectedUserId(id);
                 return [...(prev || []), id];
             });
             return;
         }
         setSelectedUserId(id);
         setSelectedUserIds([id]);
+        setSelectedRouteIds([]);
     }
 
     function toggleUserSelection(userId, checked) {
         const id = Number(userId);
         setSelectedUserIds((prev) => {
             const exists = (prev || []).some((v) => Number(v) === id);
-            if (checked && !exists) return [...(prev || []), id];
-            if (!checked && exists) return (prev || []).filter((v) => Number(v) !== id);
+            if (checked && !exists) {
+                setSelectedUserId(id);
+                return [...(prev || []), id];
+            }
+            if (!checked && exists) {
+                const next = (prev || []).filter((v) => Number(v) !== id);
+                if (Number(selectedUserId) === id) {
+                    setSelectedUserId(next.length > 0 ? Number(next[0]) : null);
+                    setSelectedRouteIds([]);
+                }
+                return next;
+            }
             return prev || [];
         });
-        if (checked) setSelectedUserId(id);
     }
 
     function toggleRouteSelection(routeId, checked) {
@@ -1004,117 +1081,118 @@ function AdminApp() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <div className="text-2xl font-black text-admin-600">WebGIS 教师管理后台</div>
-                        <div className="text-sm font-semibold text-slate-500">全局线路总览、学生筛选与账户治理</div>
+                        <div className="text-sm font-semibold text-slate-500">线路总览、学生筛选与账户管理</div>
                         {me && (
                             <div className="mt-0.5 text-xs font-semibold text-slate-500">
                                 当前账户：{me.name}（{me.username || "-"}）
                             </div>
                         )}
                     </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={refreshData} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">刷新数据</button>
-                        <button onClick={generateAllOdMap} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">一键生成全量OD图</button>
-                        <button onClick={() => exportOdPoster("png")} disabled={exportingPoster} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
-                        <button onClick={() => exportOdPoster("svg")} disabled={exportingPoster} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600 disabled:opacity-60">导出 SVG</button>
-                        <button onClick={() => window.location.href = "/admin/accounts"} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">账户管理页</button>
-                        <button onClick={() => window.location.href = "/account"} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">账户中心</button>
-                        <a href="/api/export/users-csv" className="rounded-lg bg-admin-600 px-3 py-2 text-sm font-bold text-white">导出学生 CSV</a>
-                        <button onClick={logout} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">退出登录</button>
+                    <div className="w-full xl:w-auto">
+                        <div className="flex items-center gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:justify-end xl:overflow-visible xl:pb-0">
+                            <button onClick={refreshData} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">刷新数据</button>
+                            <button onClick={generateAllOdMap} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">生成全量 OD 图</button>
+                            <button onClick={() => exportOdPoster("png")} disabled={exportingPoster} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
+                            <button onClick={() => exportOdPoster("svg")} disabled={exportingPoster} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600 disabled:opacity-60">导出 SVG</button>
+                            <button onClick={() => window.location.href = "/admin/accounts"} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">账户管理</button>
+                            <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">账户中心</button>
+                            <a href="/api/export/users-csv" className="shrink-0 rounded-lg bg-admin-600 px-3 py-2 text-sm font-bold text-white">导出学生 CSV</a>
+                            <button onClick={logout} className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600">退出登录</button>
+                        </div>
                     </div>
                 </div>
             </header>
 
-            <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 xl:grid-cols-[340px_1fr_410px]"}>
+            <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[330px_minmax(0,1fr)_390px]"}>
                 {!mapFullscreen && (
-                <aside className="ios-card rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft">
-                    <div className="mb-2 flex items-center justify-between">
-                        <div className="text-lg font-black text-admin-600">学生列表</div>
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-admin-600">{users.length}</span>
-                    </div>
-
-                    <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50/50 px-2 py-1.5 text-xs font-semibold text-slate-600">
-                        单击选择学生，双击缩放到该学生线路，右键打开操作菜单（删除路线/账户）
-                    </div>
-
-                    <input
-                        value={filters.q}
-                        onChange={(e) => setFilters((p) => ({ ...p, q: e.target.value }))}
-                        className="mb-2 w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
-                        placeholder="搜索姓名/用户名"
-                    />
-
-                    <div className="mb-3 grid grid-cols-1 gap-2">
-                        <select
-                            value={filters.status}
-                            onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))}
-                            className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm"
-                        >
-                            <option value="">状态：全部</option>
-                            <option value="online">在线</option>
-                            <option value="offline">离线</option>
-                        </select>
-                        <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-2 py-1 text-xs font-semibold text-slate-600">
-                            已多选学生：{selectedUserIds.length} 人（支持 Ctrl/⌘ + 单击 快速多选）
+                    <aside className="ios-card rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft lg:flex lg:h-[calc(100vh-220px)] lg:flex-col lg:overflow-hidden">
+                        <div className="mb-2 flex items-center justify-between">
+                            <div className="text-lg font-black text-admin-600">学生列表</div>
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-admin-600">{users.length}</span>
                         </div>
-                    </div>
 
-                    <div className="max-h-[62vh] space-y-2 overflow-auto pr-1">
-                        {users.map((u) => (
-                            <div
-                                key={u.id}
-                                onClick={(e) => handleStudentClick(e, u)}
-                                onDoubleClick={() => zoomToStudent(u.id)}
-                                onContextMenu={(e) => openStudentContextMenu(e, u)}
-                                className={`w-full rounded-xl border p-2 text-left ${
-                                    Number(selectedUserId) === Number(u.id) || selectedUserIdSet.has(Number(u.id))
-                                        ? "border-admin-300 bg-blue-50"
-                                        : "border-blue-100 bg-white"
-                                }`}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter" || e.key === " ") {
-                                        e.preventDefault();
-                                        handleStudentClick(e, u);
-                                    }
-                                }}
+                        <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50/50 px-2 py-1.5 text-xs font-semibold text-slate-600">
+                            单击选择学生，双击缩放到该学生线路，右键打开操作菜单（删除路线/账户）
+                        </div>
+
+                        <input
+                            value={filters.q}
+                            onChange={(e) => setFilters((p) => ({ ...p, q: e.target.value }))}
+                            className="mb-2 w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
+                            placeholder="搜索姓名/用户名"
+                        />
+
+                        <div className="mb-3 grid grid-cols-1 gap-2">
+                            <select
+                                value={filters.status}
+                                onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))}
+                                className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm"
                             >
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedUserIdSet.has(Number(u.id))}
-                                        onClick={(e) => e.stopPropagation()}
-                                        onChange={(e) => toggleUserSelection(u.id, e.target.checked)}
-                                        className="h-4 w-4"
-                                        title="加入多选"
-                                    />
-                                    <img
-                                        src={u.avatar_url || "/static/images/avatar-default.svg"}
-                                        alt={u.name}
-                                        className="h-10 w-10 rounded-full border border-blue-200 object-cover"
-                                    />
-                                    <div className="min-w-0 flex-1">
-                                        <div className="truncate text-sm font-bold text-slate-700">{u.name}</div>
-                                        <div className="truncate text-xs font-semibold text-slate-500">
-                                            用户名：{u.username || "未设置"}
+                                <option value="">状态：全部</option>
+                                <option value="online">在线</option>
+                                <option value="offline">离线</option>
+                            </select>
+                            <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-2 py-1 text-xs font-semibold text-slate-600">
+                                已多选学生：{selectedUserIds.length} 人（支持 Ctrl/⌘ + 单击）
+                            </div>
+                        </div>
+
+                        <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
+                            {users.map((u) => (
+                                <div
+                                    key={u.id}
+                                    onClick={(e) => handleStudentClick(e, u)}
+                                    onDoubleClick={() => zoomToStudent(u.id)}
+                                    onContextMenu={(e) => openStudentContextMenu(e, u)}
+                                    className={`w-full rounded-xl border p-2 text-left ${Number(selectedUserId) === Number(u.id) || selectedUserIdSet.has(Number(u.id))
+                                            ? "border-admin-300 bg-blue-50"
+                                            : "border-blue-100 bg-white"
+                                        }`}
+                                    role="button"
+                                    tabIndex={0}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            handleStudentClick(e, u);
+                                        }
+                                    }}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedUserIdSet.has(Number(u.id))}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={(e) => toggleUserSelection(u.id, e.target.checked)}
+                                            className="h-4 w-4"
+                                            title="加入多选"
+                                        />
+                                        <img
+                                            src={u.avatar_url || "/static/images/avatar-default.svg"}
+                                            alt={u.name}
+                                            className="h-10 w-10 rounded-full border border-blue-200 object-cover"
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <div className="truncate text-sm font-bold text-slate-700">{u.name}</div>
+                                            <div className="truncate text-xs font-semibold text-slate-500">
+                                                用户名：{u.username || "未设置"}
+                                            </div>
+                                        </div>
+                                        <div className="text-right text-xs font-bold text-slate-500">
+                                            <div>{api.fmtNumber(u.route_count)} 条</div>
+                                            <div>{u.status}</div>
                                         </div>
                                     </div>
-                                    <div className="text-right text-xs font-bold text-slate-500">
-                                        <div>{api.fmtNumber(u.route_count)} 条</div>
-                                        <div>{u.status}</div>
-                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
 
-                        {users.length === 0 && (
-                            <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm font-semibold text-slate-500">没有匹配的学生</div>
-                        )}
-                    </div>
-                </aside>
+                            {users.length === 0 && (
+                                <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm font-semibold text-slate-500">没有匹配的学生</div>
+                            )}
+                        </div>
+                    </aside>
                 )}
 
-                <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "relative h-[60vh] min-h-[360px] overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-soft sm:h-[74vh] sm:min-h-[620px]"} ios-card`}>
+                <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "relative h-[58vh] min-h-[360px] overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-soft sm:h-[70vh] sm:min-h-[560px] lg:h-[calc(100vh-220px)] lg:min-h-[560px] xl:min-h-[620px]"} ios-card`}>
                     <div ref={mapHostRef} className="h-full w-full" />
 
                     <div className="absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
@@ -1129,7 +1207,7 @@ function AdminApp() {
                         </button>
                     </div>
 
-                    <div className="absolute right-3 top-3 z-[900] w-[min(90vw,340px)] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft sm:right-4 sm:top-4">
+                    <div className="absolute right-3 top-3 z-[900] w-[min(92vw,350px)] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft sm:right-4 sm:top-4 xl:w-[360px]">
                         <div className="flex items-center justify-between gap-2">
                             <div className="text-xs font-bold tracking-wide text-slate-500">地图筛选控制</div>
                             <button
@@ -1141,86 +1219,86 @@ function AdminApp() {
                         </div>
 
                         <div className={`ios-collapse ${filterPanelOpen ? "mt-2 max-h-[900px] opacity-100" : "max-h-0 opacity-0"}`}>
-                        <div className="text-xs font-semibold text-slate-500">学生范围</div>
-                        <div className="mt-1 grid grid-cols-2 gap-2">
-                            <button
-                                type="button"
-                                onClick={showAllStudentsRoutes}
-                                className={`rounded-md border px-2 py-1 text-xs font-bold ${!onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
+                            <div className="text-xs font-semibold text-slate-500">学生范围</div>
+                            <div className="mt-1 grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={showAllStudentsRoutes}
+                                    className={`rounded-md border px-2 py-1 text-xs font-bold ${!onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
+                                >
+                                    全部学生
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={showSelectedStudentRoutes}
+                                    disabled={selectedUserIds.length === 0}
+                                    className={`rounded-md border px-2 py-1 text-xs font-bold disabled:opacity-60 ${onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
+                                >
+                                    仅选中学生
+                                </button>
+                            </div>
+
+                            <div className="mt-2 text-xs font-semibold text-slate-500">
+                                线路多选筛选：已选 {selectedRouteIds.length} 条（在右侧“选中学生线路”勾选）
+                            </div>
+                            <div className="mt-1 flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    disabled={selectedRouteIds.length === 0}
+                                    onClick={focusSelectedRoutes}
+                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                >
+                                    展示已选线路
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={selectedRouteIds.length === 0}
+                                    onClick={() => setSelectedRouteIds([])}
+                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                >
+                                    清空线路多选
+                                </button>
+                            </div>
+
+                            <div className="mt-2 text-xs font-semibold text-slate-500">分类筛选</div>
+                            <select
+                                value={routeCategory}
+                                onChange={(e) => setRouteCategory(e.target.value)}
+                                className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
                             >
-                                全部学生
-                            </button>
-                            <button
-                                type="button"
-                                onClick={showSelectedStudentRoutes}
-                                disabled={selectedUserIds.length === 0}
-                                className={`rounded-md border px-2 py-1 text-xs font-bold disabled:opacity-60 ${onlySelectedStudent ? "border-admin-300 bg-blue-50 text-admin-600" : "border-blue-200 bg-white text-slate-600"}`}
+                                {categoryOptions.map((cat) => (
+                                    <option key={cat} value={cat}>
+                                        {cat === "all" ? "全部分类" : cat}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <div className="mt-2 text-xs font-semibold text-slate-500">关键词筛选</div>
+                            <input
+                                value={routeKeyword}
+                                onChange={(e) => setRouteKeyword(e.target.value)}
+                                className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
+                                placeholder="起终点/分类/学生名"
+                            />
+
+                            <div className="mt-2 text-xs font-semibold text-slate-500">线路标注</div>
+                            <select
+                                value={lineLabelMode}
+                                onChange={(e) => setLineLabelMode(e.target.value)}
+                                className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
                             >
-                                仅选中学生
-                            </button>
-                        </div>
+                                <option value="none">不显示标注</option>
+                                <option value="simple">仅姓名标注</option>
+                                <option value="detail">姓名 + 分类</option>
+                            </select>
 
-                        <div className="mt-2 text-xs font-semibold text-slate-500">
-                            线路多选筛选：已选 {selectedRouteIds.length} 条（在右侧“选中学生线路”勾选）
-                        </div>
-                        <div className="mt-1 flex items-center gap-2">
-                            <button
-                                type="button"
-                                disabled={selectedRouteIds.length === 0}
-                                onClick={focusSelectedRoutes}
-                                className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
-                            >
-                                展示已选线路
-                            </button>
-                            <button
-                                type="button"
-                                disabled={selectedRouteIds.length === 0}
-                                onClick={() => setSelectedRouteIds([])}
-                                className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
-                            >
-                                清空线路多选
-                            </button>
-                        </div>
-
-                        <div className="mt-2 text-xs font-semibold text-slate-500">分类筛选</div>
-                        <select
-                            value={routeCategory}
-                            onChange={(e) => setRouteCategory(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
-                        >
-                            {categoryOptions.map((cat) => (
-                                <option key={cat} value={cat}>
-                                    {cat === "all" ? "全部分类" : cat}
-                                </option>
-                            ))}
-                        </select>
-
-                        <div className="mt-2 text-xs font-semibold text-slate-500">关键词筛选</div>
-                        <input
-                            value={routeKeyword}
-                            onChange={(e) => setRouteKeyword(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
-                            placeholder="起终点/分类/学生名"
-                        />
-
-                        <div className="mt-2 text-xs font-semibold text-slate-500">线路标注</div>
-                        <select
-                            value={lineLabelMode}
-                            onChange={(e) => setLineLabelMode(e.target.value)}
-                            className="mt-1 w-full rounded-lg border border-blue-200 px-2 py-1.5 text-xs"
-                        >
-                            <option value="none">不显示标注</option>
-                            <option value="simple">仅姓名标注</option>
-                            <option value="detail">姓名 + 分类</option>
-                        </select>
-
-                        <div className="mt-2 flex items-center justify-between">
-                            <div className="text-xs font-semibold text-slate-500">可见线路：{api.fmtNumber(activeRoutes.length)} 条</div>
-                            <button onClick={clearMapFilters} className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600">
-                                清空筛选
-                            </button>
-                        </div>
-                        <div className="mt-1 text-xs font-semibold text-slate-500">底图：{baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}</div>
+                            <div className="mt-2 flex items-center justify-between">
+                                <div className="text-xs font-semibold text-slate-500">可见线路：{api.fmtNumber(activeRoutes.length)} 条</div>
+                                <button onClick={clearMapFilters} className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600">
+                                    清空筛选
+                                </button>
+                            </div>
+                            <div className="mt-1 text-xs font-semibold text-slate-500">底图：{baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}</div>
                         </div>
                     </div>
 
@@ -1273,130 +1351,129 @@ function AdminApp() {
                 </section>
 
                 {!mapFullscreen && (
-                <aside className="ios-card max-h-[74vh] space-y-3 overflow-auto rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft">
-                    <div className="grid grid-cols-2 gap-2">
-                        <MetricCard title="学生总数" value={api.fmtNumber(overview.total_students || 0)} />
-                        <MetricCard title="在线学生" value={api.fmtNumber(overview.active_students || 0)} />
-                        <MetricCard title="今日新增" value={api.fmtNumber(overview.new_students_today || 0)} />
-                        <MetricCard title="路线总数" value={api.fmtNumber(overview.total_routes || 0)} />
-                        <MetricCard
-                            title="路线最多学生"
-                            value={overview.top_student ? overview.top_student.name : "暂无"}
-                            hint={overview.top_student ? `ID: ${overview.top_student.id}` : ""}
-                        />
-                    </div>
+                    <aside className="ios-card space-y-3 overflow-auto rounded-2xl border border-blue-100 bg-white/95 p-4 shadow-soft lg:col-span-2 2xl:col-span-1 2xl:max-h-[calc(100vh-220px)]">
+                        <div className="grid grid-cols-2 gap-2">
+                            <MetricCard title="学生总数" value={api.fmtNumber(overview.total_students || 0)} />
+                            <MetricCard title="在线学生" value={api.fmtNumber(overview.active_students || 0)} />
+                            <MetricCard title="今日新增" value={api.fmtNumber(overview.new_students_today || 0)} />
+                            <MetricCard title="路线总数" value={api.fmtNumber(overview.total_routes || 0)} />
+                            <MetricCard
+                                title="路线最多学生"
+                                value={overview.top_student ? overview.top_student.name : "暂无"}
+                                hint={overview.top_student ? `ID: ${overview.top_student.id}` : ""}
+                            />
+                        </div>
 
-                    <div className="rounded-xl border border-blue-100 p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                            <div className="text-sm font-black text-admin-600">选中学生线路</div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => {
-                                        if (!selectedUserId) return;
-                                        zoomToStudent(selectedUserId);
-                                    }}
-                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
-                                >
-                                    一键定位学生
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={selectedUserRoutes.length === 0}
-                                    onClick={() => setSelectedRouteIds(selectedUserRoutes.map((r) => String(r.id)))}
-                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
-                                >
-                                    全选线路
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={selectedRouteIds.length === 0}
-                                    onClick={() => setSelectedRouteIds([])}
-                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
-                                >
-                                    清空多选
-                                </button>
-                            </div>
-                        </div>
-                        <div className="mb-2 flex items-center justify-between">
-                            <div className="text-xs font-semibold text-slate-500">已勾选线路：{selectedRouteIds.length} 条</div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    disabled={selectedRouteIds.length === 0}
-                                    onClick={focusSelectedRoutes}
-                                    className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
-                                >
-                                    展示已选
-                                </button>
-                                <button
-                                    type="button"
-                                    disabled={selectedRouteIds.length === 0 || !!routeDeleteBusyId}
-                                    onClick={removeSelectedRoutes}
-                                    className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 disabled:opacity-60"
-                                >
-                                    {routeDeleteBusyId === "batch" ? "删除中..." : "删除已选"}
-                                </button>
-                            </div>
-                        </div>
-                        <div className="mb-2 text-xs font-semibold text-slate-500">支持 Ctrl/⌘ + 单击 进行线路多选，双击可直接定位线路</div>
-                        <div className="max-h-[240px] space-y-2 overflow-auto pr-1">
-                            {selectedUserRoutes.slice(0, 16).map((route) => (
-                                <div
-                                    key={route.id}
-                                    onClick={(e) => handleRouteRowClick(e, route)}
-                                    onDoubleClick={() => zoomToRoutes([route])}
-                                    role="button"
-                                    tabIndex={0}
-                                    onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ") {
-                                            e.preventDefault();
-                                            handleRouteRowClick(e, route);
-                                        }
-                                    }}
-                                    className={`rounded-lg border p-2 transition-all duration-200 ${
-                                        selectedRouteIdSet.has(String(route.id)) ? "border-admin-300 bg-blue-50" : "border-blue-100 bg-blue-50/40"
-                                    }`}
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedRouteIdSet.has(String(route.id))}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onChange={(e) => toggleRouteSelection(route.id, e.target.checked)}
-                                            className="h-4 w-4"
-                                        />
-                                        <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700">{routeBrief(route)}</div>
-                                    </div>
-                                    <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
-                                    <div className="mt-1 flex items-center justify-end gap-2">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                zoomToRoutes([route]);
-                                            }}
-                                            className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
-                                        >
-                                            定位
-                                        </button>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                focusOneRoute(route);
-                                            }}
-                                            className="rounded-md border border-admin-200 bg-admin-50 px-2 py-1 text-xs font-bold text-admin-600"
-                                        >
-                                            仅显示此线路
-                                        </button>
-                                    </div>
+                        <div className="rounded-xl border border-blue-100 p-3">
+                            <div className="mb-2 flex items-center justify-between">
+                                <div className="text-sm font-black text-admin-600">选中学生线路</div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => {
+                                            if (!selectedUserId) return;
+                                            zoomToStudent(selectedUserId);
+                                        }}
+                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
+                                    >
+                                        定位学生
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={selectedUserRoutes.length === 0}
+                                        onClick={() => setSelectedRouteIds(selectedUserRoutes.map((r) => String(r.id)))}
+                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                    >
+                                        全选线路
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={selectedRouteIds.length === 0}
+                                        onClick={() => setSelectedRouteIds([])}
+                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                    >
+                                        清空多选
+                                    </button>
                                 </div>
-                            ))}
-                            {selectedUserRoutes.length === 0 && (
-                                <div className="text-sm font-semibold text-slate-500">暂无该学生线路</div>
-                            )}
+                            </div>
+                            <div className="mb-2 flex items-center justify-between">
+                                <div className="text-xs font-semibold text-slate-500">已勾选线路：{selectedRouteIds.length} 条</div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={selectedRouteIds.length === 0}
+                                        onClick={focusSelectedRoutes}
+                                        className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600 disabled:opacity-60"
+                                    >
+                                        展示已选
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={selectedRouteIds.length === 0 || !!routeDeleteBusyId}
+                                        onClick={removeSelectedRoutes}
+                                        className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 disabled:opacity-60"
+                                    >
+                                        {routeDeleteBusyId === "batch" ? "删除中..." : "删除已选"}
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="mb-2 text-xs font-semibold text-slate-500">支持 Ctrl/⌘ + 单击 进行线路多选，双击可直接定位线路</div>
+                            <div className="max-h-[240px] space-y-2 overflow-auto pr-1 2xl:max-h-[36vh]">
+                                {selectedUserRoutes.slice(0, isCompactScreen ? 16 : 24).map((route) => (
+                                    <div
+                                        key={route.id}
+                                        onClick={(e) => handleRouteRowClick(e, route)}
+                                        onDoubleClick={() => zoomToRoutes([route])}
+                                        role="button"
+                                        tabIndex={0}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                e.preventDefault();
+                                                handleRouteRowClick(e, route);
+                                            }
+                                        }}
+                                        className={`rounded-lg border p-2 transition-all duration-200 ${selectedRouteIdSet.has(String(route.id)) ? "border-admin-300 bg-blue-50" : "border-blue-100 bg-blue-50/40"
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedRouteIdSet.has(String(route.id))}
+                                                onClick={(e) => e.stopPropagation()}
+                                                onChange={(e) => toggleRouteSelection(route.id, e.target.checked)}
+                                                className="h-4 w-4"
+                                            />
+                                            <div className="min-w-0 flex-1 truncate text-sm font-bold text-slate-700">{routeBrief(route)}</div>
+                                        </div>
+                                        <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
+                                        <div className="mt-1 flex items-center justify-end gap-2">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    zoomToRoutes([route]);
+                                                }}
+                                                className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
+                                            >
+                                                定位
+                                            </button>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    focusOneRoute(route);
+                                                }}
+                                                className="rounded-md border border-admin-200 bg-admin-50 px-2 py-1 text-xs font-bold text-admin-600"
+                                            >
+                                                仅显示此线路
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                                {selectedUserRoutes.length === 0 && (
+                                    <div className="text-sm font-semibold text-slate-500">暂无该学生线路</div>
+                                )}
+                            </div>
                         </div>
-                    </div>
 
-                </aside>
+                    </aside>
                 )}
             </main>
 

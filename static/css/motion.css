@@ -1,9 +1,13 @@
 :root {
-    --ios-ease: cubic-bezier(0.22, 1, 0.36, 1);
-    --ios-ease-soft: cubic-bezier(0.25, 0.8, 0.3, 1);
-    --ios-fast: 0.22s;
-    --ios-normal: 0.36s;
-    --ios-slow: 0.56s;
+    --w11-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --w11-ease-out: cubic-bezier(0.2, 0.9, 0.2, 1);
+    --w11-fast: 0.18s;
+    --w11-normal: 0.28s;
+    --w11-slow: 0.42s;
+    --w11-glass-bg: rgba(255, 255, 255, 0.72);
+    --w11-glass-border: rgba(255, 255, 255, 0.55);
+    --w11-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+    --w11-shadow-hover: 0 24px 48px rgba(15, 23, 42, 0.16);
 }
 
 * {
@@ -18,9 +22,9 @@ body {
     position: relative;
     isolation: isolate;
     overscroll-behavior-y: none;
-    background-size: 180% 180%;
-    animation: pageGradientShift 18s var(--ios-ease-soft) infinite;
-    will-change: background-position;
+    background: radial-gradient(circle at 22% 8%, #f7fbff 0%, #edf4ff 46%, #e8f0ff 100%);
+    background-size: 140% 140%;
+    animation: winBgShift 14s var(--w11-ease) infinite;
 }
 
 body::before,
@@ -28,50 +32,48 @@ body::after {
     content: "";
     position: fixed;
     border-radius: 9999px;
-    filter: blur(48px);
     pointer-events: none;
+    filter: blur(44px);
     z-index: -1;
-    opacity: 0.3;
-    will-change: transform, opacity;
+    opacity: 0.24;
 }
 
 body::before {
-    width: 34vw;
-    height: 34vw;
-    left: -10vw;
-    top: -12vw;
-    background: radial-gradient(circle, #7dc4ff 0%, rgba(125, 196, 255, 0) 68%);
-    animation: floatBlobA 14s var(--ios-ease) infinite;
+    width: 30vw;
+    height: 30vw;
+    left: -8vw;
+    top: -10vw;
+    background: radial-gradient(circle, #8fc2ff 0%, rgba(143, 194, 255, 0) 68%);
+    animation: winOrbA 16s var(--w11-ease-out) infinite;
 }
 
 body::after {
-    width: 40vw;
-    height: 40vw;
-    right: -12vw;
-    bottom: -16vw;
-    background: radial-gradient(circle, #8ed8ff 0%, rgba(142, 216, 255, 0) 70%);
-    animation: floatBlobB 16s var(--ios-ease) infinite;
+    width: 34vw;
+    height: 34vw;
+    right: -10vw;
+    bottom: -12vw;
+    background: radial-gradient(circle, #9fdcff 0%, rgba(159, 220, 255, 0) 70%);
+    animation: winOrbB 18s var(--w11-ease-out) infinite;
 }
 
 .ios-card {
-    backdrop-filter: blur(12px);
+    background: var(--w11-glass-bg);
+    border: 1px solid var(--w11-glass-border);
+    backdrop-filter: blur(16px) saturate(135%);
+    box-shadow: var(--w11-shadow);
     transition:
-        transform var(--ios-slow) var(--ios-ease),
-        box-shadow var(--ios-slow) var(--ios-ease),
-        opacity var(--ios-normal) var(--ios-ease),
-        border-color var(--ios-normal) var(--ios-ease);
+        transform var(--w11-normal) var(--w11-ease),
+        box-shadow var(--w11-normal) var(--w11-ease),
+        background-color var(--w11-normal) var(--w11-ease),
+        border-color var(--w11-normal) var(--w11-ease),
+        opacity var(--w11-normal) var(--w11-ease);
     will-change: transform, box-shadow, opacity;
-}
-
-.ios-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 14px 34px rgba(31, 103, 245, 0.16);
 }
 
 @media (hover: hover) and (pointer: fine) {
     .ios-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 18px 40px rgba(31, 103, 245, 0.2);
+        transform: translateY(-2px);
+        box-shadow: var(--w11-shadow-hover);
     }
 }
 
@@ -81,17 +83,24 @@ select,
 textarea,
 a {
     transition:
-        transform var(--ios-fast) var(--ios-ease),
-        box-shadow var(--ios-normal) var(--ios-ease),
-        border-color var(--ios-normal) var(--ios-ease),
-        background-color var(--ios-normal) var(--ios-ease),
-        color var(--ios-normal) var(--ios-ease),
-        opacity var(--ios-normal) var(--ios-ease);
-    will-change: transform, box-shadow;
+        transform var(--w11-fast) var(--w11-ease),
+        box-shadow var(--w11-normal) var(--w11-ease),
+        border-color var(--w11-normal) var(--w11-ease),
+        background-color var(--w11-normal) var(--w11-ease),
+        color var(--w11-normal) var(--w11-ease),
+        opacity var(--w11-normal) var(--w11-ease);
 }
 
 button:hover:not(:disabled) {
     transform: translateY(-1px);
+}
+
+button:active {
+    transform: scale(0.98);
+}
+
+button:disabled {
+    cursor: not-allowed;
 }
 
 button:focus-visible,
@@ -100,15 +109,7 @@ select:focus-visible,
 textarea:focus-visible,
 a:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22);
-}
-
-button:active {
-    transform: scale(0.97);
-}
-
-button:disabled {
-    cursor: not-allowed;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }
 
 .safe-pb {
@@ -116,33 +117,32 @@ button:disabled {
 }
 
 .ios-fade-up {
-    animation: iosFadeUp var(--ios-slow) var(--ios-ease);
+    animation: winFadeUp var(--w11-slow) var(--w11-ease);
 }
 
 .ios-fade-in {
-    animation: iosFadeIn var(--ios-normal) var(--ios-ease);
+    animation: winFadeIn var(--w11-normal) var(--w11-ease);
 }
 
 .ios-pop-in {
-    animation: iosPopIn 0.42s var(--ios-ease);
+    animation: winPopIn 0.34s var(--w11-ease-out);
 }
 
 .ios-collapse {
     overflow: hidden;
     transform-origin: top;
     transition:
-        max-height var(--ios-slow) var(--ios-ease),
-        opacity var(--ios-normal) var(--ios-ease),
-        margin var(--ios-normal) var(--ios-ease);
-    will-change: max-height, opacity, margin;
+        max-height var(--w11-slow) var(--w11-ease),
+        opacity var(--w11-normal) var(--w11-ease),
+        margin var(--w11-normal) var(--w11-ease);
 }
 
 .ios-mode-panel {
-    transition:
-        transform var(--ios-normal) var(--ios-ease),
-        opacity var(--ios-normal) var(--ios-ease),
-        filter var(--ios-normal) var(--ios-ease);
     transform-origin: top center;
+    transition:
+        transform var(--w11-normal) var(--w11-ease),
+        opacity var(--w11-normal) var(--w11-ease),
+        filter var(--w11-normal) var(--w11-ease);
 }
 
 .ios-mode-panel-show {
@@ -153,22 +153,22 @@ button:disabled {
 
 .ios-mode-panel-hide {
     opacity: 0;
-    transform: translateY(-6px) scale(0.99);
+    transform: translateY(-6px) scale(0.992);
     filter: blur(1px);
 }
 
 .ios-tab-switch {
-    transition: background-color var(--ios-normal) var(--ios-ease), box-shadow var(--ios-normal) var(--ios-ease);
+    backdrop-filter: blur(8px);
+    transition: background-color var(--w11-normal) var(--w11-ease), box-shadow var(--w11-normal) var(--w11-ease);
 }
 
 .ios-tab-pane {
     position: absolute;
     inset: 0;
     transition:
-        transform var(--ios-slow) var(--ios-ease),
-        opacity var(--ios-normal) var(--ios-ease),
-        filter var(--ios-normal) var(--ios-ease);
-    will-change: transform, opacity;
+        transform var(--w11-slow) var(--w11-ease),
+        opacity var(--w11-normal) var(--w11-ease),
+        filter var(--w11-normal) var(--w11-ease);
 }
 
 .ios-tab-pane-active {
@@ -191,45 +191,114 @@ button:disabled {
 }
 
 .leaflet-container {
-    transition: filter var(--ios-normal) var(--ios-ease), transform var(--ios-normal) var(--ios-ease);
+    transition: filter var(--w11-normal) var(--w11-ease), transform var(--w11-normal) var(--w11-ease);
+}
+
+.leaflet-bar,
+.leaflet-control-zoom {
+    border: 1px solid rgba(191, 219, 254, 0.95) !important;
+    border-radius: 10px !important;
+    overflow: hidden;
+    box-shadow: 0 10px 20px rgba(30, 64, 175, 0.14);
 }
 
 .leaflet-bar a,
 .leaflet-control-zoom a {
-    transition: background-color var(--ios-normal) var(--ios-ease), color var(--ios-normal) var(--ios-ease), transform var(--ios-fast) var(--ios-ease);
+    background: rgba(255, 255, 255, 0.92) !important;
+    color: #1d4ed8 !important;
+    border-bottom-color: rgba(191, 219, 254, 0.9) !important;
+    transition: background-color var(--w11-normal) var(--w11-ease), color var(--w11-normal) var(--w11-ease);
 }
 
 .leaflet-bar a:hover,
 .leaflet-control-zoom a:hover {
-    transform: translateY(-1px);
+    background: rgba(239, 246, 255, 0.96) !important;
+}
+
+.leaflet-control-scale {
+    margin-right: 10px !important;
+    margin-bottom: 10px !important;
+}
+
+.leaflet-control-scale-line {
+    border: 1px solid rgba(30, 64, 175, 0.9) !important;
+    border-top: none !important;
+    background: rgba(255, 255, 255, 0.92) !important;
+    color: #1e3a8a !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    line-height: 1.2 !important;
+    box-shadow: 0 6px 16px rgba(30, 64, 175, 0.12);
+}
+
+.leaflet-control-scale-line:first-child {
+    border-top: 1px solid rgba(30, 64, 175, 0.9) !important;
+}
+
+.leaflet-control-north {
+    margin-right: 10px !important;
+    margin-bottom: 6px !important;
+}
+
+.leaflet-control-north .north-indicator {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    border: 1px solid rgba(191, 219, 254, 0.95);
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 10px 20px rgba(30, 64, 175, 0.14);
+    position: relative;
+}
+
+.leaflet-control-north .north-indicator-arrow {
+    position: absolute;
+    left: 50%;
+    top: 9px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-bottom: 14px solid #1d4ed8;
+}
+
+.leaflet-control-north .north-indicator-text {
+    position: absolute;
+    left: 50%;
+    bottom: 7px;
+    transform: translateX(-50%);
+    font-size: 12px;
+    font-weight: 900;
+    color: #1e3a8a;
+    letter-spacing: 0.08em;
 }
 
 .leaflet-tooltip.od-line-label {
-    transition: transform var(--ios-fast) var(--ios-ease), opacity var(--ios-normal) var(--ios-ease);
+    transition: transform var(--w11-fast) var(--w11-ease), opacity var(--w11-normal) var(--w11-ease);
 }
 
-@keyframes pageGradientShift {
+@keyframes winBgShift {
     0% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
 }
 
-@keyframes floatBlobA {
-    0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.3; }
-    50% { transform: translate3d(6vw, 2vw, 0) scale(1.08); opacity: 0.42; }
-    100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.3; }
-}
-
-@keyframes floatBlobB {
+@keyframes winOrbA {
     0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.24; }
-    50% { transform: translate3d(-6vw, -2vw, 0) scale(1.1); opacity: 0.38; }
+    50% { transform: translate3d(5vw, 2vw, 0) scale(1.05); opacity: 0.34; }
     100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.24; }
 }
 
-@keyframes iosFadeUp {
+@keyframes winOrbB {
+    0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.2; }
+    50% { transform: translate3d(-5vw, -2vw, 0) scale(1.08); opacity: 0.3; }
+    100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.2; }
+}
+
+@keyframes winFadeUp {
     from {
         opacity: 0;
-        transform: translateY(14px);
+        transform: translateY(12px);
     }
     to {
         opacity: 1;
@@ -237,15 +306,15 @@ button:disabled {
     }
 }
 
-@keyframes iosFadeIn {
+@keyframes winFadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
 }
 
-@keyframes iosPopIn {
+@keyframes winPopIn {
     from {
         opacity: 0;
-        transform: scale(0.97);
+        transform: scale(0.985);
     }
     to {
         opacity: 1;

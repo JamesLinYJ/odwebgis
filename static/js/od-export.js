@@ -44,8 +44,6 @@
                     destination_lat: destinationLat,
                     destination_lon: destinationLon,
                     category: route.category || "未分类",
-                    user_name: route.user_name || route.username || "",
-                    created_at: route.created_at || "",
                 };
             })
             .filter((route) =>
@@ -60,12 +58,8 @@
             );
     }
 
-    function routeLabel(route) {
-        return `${route.origin_name || "起点"} -> ${route.destination_name || "终点"}`;
-    }
-
     function colorForCategory(category, idx, customMap = {}) {
-        return customMap[category] || ["#2563eb", "#0891b2", "#7c3aed", "#f97316", "#0f766e"][idx % 5];
+        return customMap[category] || ["#2563eb", "#0891b2", "#7c3aed", "#f97316", "#0f766e", "#dc2626", "#14b8a6"][idx % 7];
     }
 
     function colorWithAlpha(hex, alpha) {
@@ -90,9 +84,11 @@
             minLon = Math.min(minLon, route.origin_lon, route.destination_lon);
             maxLon = Math.max(maxLon, route.origin_lon, route.destination_lon);
         });
+
         if (!Number.isFinite(minLat) || !Number.isFinite(maxLat) || !Number.isFinite(minLon) || !Number.isFinite(maxLon)) {
             return { minLat: 18, maxLat: 54.5, minLon: 73, maxLon: 135.5 };
         }
+
         const latPad = Math.max(1.2, (maxLat - minLat) * 0.18);
         const lonPad = Math.max(1.2, (maxLon - minLon) * 0.18);
         return {
@@ -120,9 +116,7 @@
         const offset = Math.max(12, dist * 0.2);
         const cx = (x1 + x2) / 2 + (dy / dist) * offset;
         const cy = (y1 + y2) / 2 - (dx / dist) * offset;
-        const mx = 0.25 * x1 + 0.5 * cx + 0.25 * x2;
-        const my = 0.25 * y1 + 0.5 * cy + 0.25 * y2;
-        return { cx, cy, mx, my };
+        return { cx, cy };
     }
 
     function buildCategoryLegend(routes) {
@@ -135,11 +129,115 @@
         return Array.from(byCategory.entries()).sort((a, b) => b[1].count - a[1].count);
     }
 
-    function pickLabeledRoutes(routes, limit) {
-        const rows = routes
-            .filter((r) => String(r.user_name || "").trim())
-            .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
-        return rows.slice(0, limit);
+    function pickNiceDistanceKm(targetKm) {
+        const target = Math.max(0.02, Number(targetKm) || 0.02);
+        const exp = Math.floor(Math.log10(target));
+        const base = Math.pow(10, exp);
+        const candidates = [1, 2, 5, 10].map((n) => n * base);
+        let best = candidates[0];
+        let delta = Math.abs(best - target);
+        candidates.forEach((c) => {
+            const d = Math.abs(c - target);
+            if (d < delta) {
+                best = c;
+                delta = d;
+            }
+        });
+        return Math.max(best, 0.02);
+    }
+
+    function formatDistanceLabel(km) {
+        if (km >= 1) return `${Number(km.toFixed(km >= 10 ? 0 : 1))} km`;
+        return `${Math.round(km * 1000)} m`;
+    }
+
+    function estimateKmPerPixelFromBounds(bounds, pixelWidth) {
+        const meanLat = (bounds.minLat + bounds.maxLat) / 2;
+        const spanLon = Math.max(1e-6, bounds.maxLon - bounds.minLon);
+        const kmPerDegLon = 111.32 * Math.cos((meanLat * Math.PI) / 180);
+        return (spanLon * kmPerDegLon) / Math.max(1, pixelWidth);
+    }
+
+    function estimateKmPerPixelFromMap(map, mapSize) {
+        try {
+            const y = Math.round(mapSize.y * 0.7);
+            const left = map.containerPointToLatLng([0, y]);
+            const right = map.containerPointToLatLng([100, y]);
+            if (!left || !right || typeof left.distanceTo !== "function") return null;
+            const meters = left.distanceTo(right);
+            if (!Number.isFinite(meters) || meters <= 0) return null;
+            return (meters / 1000) / 100;
+        } catch {
+            return null;
+        }
+    }
+
+    function createScaleSpec(kmPerPixel, targetPx, minPx, maxPx) {
+        const safeKmPerPx = Math.max(1e-6, Number(kmPerPixel) || 1e-6);
+        const targetKm = safeKmPerPx * targetPx;
+        const niceKm = pickNiceDistanceKm(targetKm);
+        const barPx = clamp(niceKm / safeKmPerPx, minPx, maxPx);
+        const shownKm = safeKmPerPx * barPx;
+        return {
+            barPx,
+            label: formatDistanceLabel(shownKm),
+        };
+    }
+
+    function curveBox(x1, y1, cx, cy, x2, y2, pad = 0) {
+        return {
+            x: Math.min(x1, cx, x2) - pad,
+            y: Math.min(y1, cy, y2) - pad,
+            w: Math.max(x1, cx, x2) - Math.min(x1, cx, x2) + pad * 2,
+            h: Math.max(y1, cy, y2) - Math.min(y1, cy, y2) + pad * 2,
+        };
+    }
+
+    function rectOverlapArea(a, b) {
+        const x1 = Math.max(a.x, b.x);
+        const y1 = Math.max(a.y, b.y);
+        const x2 = Math.min(a.x + a.w, b.x + b.w);
+        const y2 = Math.min(a.y + a.h, b.y + b.h);
+        if (x2 <= x1 || y2 <= y1) return 0;
+        return (x2 - x1) * (y2 - y1);
+    }
+
+    function pickBottomRightLegendBox(mapX, mapY, mapW, mapH, panelW, panelH, routeBoxes, gap = 16) {
+        const maxPanelW = Math.max(96, mapW - gap * 2);
+        const maxPanelH = Math.max(64, mapH - gap * 2);
+        const w = Math.min(panelW, maxPanelW);
+        const h = Math.min(panelH, maxPanelH);
+        const x = mapX + mapW - gap - w;
+        const yStart = mapY + mapH - gap - h;
+        const yMin = mapY + gap;
+        const step = Math.max(6, Math.round(h / 12));
+
+        let best = { x, y: yStart, score: Number.POSITIVE_INFINITY };
+        for (let y = yStart; y >= yMin; y -= step) {
+            const box = { x, y, w, h };
+            let overlap = 0;
+            routeBoxes.forEach((rb) => {
+                overlap += rectOverlapArea(box, rb);
+            });
+            // Prefer staying near bottom-right when overlap is equal.
+            const score = overlap + (yStart - y) * w * 0.05;
+            if (score < best.score) {
+                best = { x, y, score };
+                if (overlap < 1e-3) break;
+            }
+        }
+        return { x: best.x, y: best.y, w, h };
+    }
+
+    function drawNorthArrowSvg(x, y, size) {
+        const half = size / 2;
+        return (
+            `<g>` +
+            `<circle cx="${x}" cy="${y}" r="${half + 8}" fill="rgba(255,255,255,0.9)" stroke="#bfdbfe"/>` +
+            `<path d="M ${x} ${y - half} L ${x - half * 0.42} ${y + half * 0.56} L ${x} ${y + half * 0.2} L ${x + half * 0.42} ${y + half * 0.56} Z" fill="#1d4ed8"/>` +
+            `<text x="${x}" y="${y - half - 8}" text-anchor="middle" font-size="${Math.round(size * 0.36)}" font-weight="800" fill="#1e3a8a">N</text>` +
+            `</g>`
+        );
     }
 
     function createPosterSvg(inputRoutes, options = {}) {
@@ -149,81 +247,76 @@
         const width = clamp(safeNumber(options.width, 1920), 960, 4096);
         const height = clamp(safeNumber(options.height, 1080), 600, 4096);
         const title = options.title || "OD 流向图";
-        const subtitle = options.subtitle || "WebGIS 导出";
-        const owner = options.owner || "";
         const categoryColors = options.categoryColors || {};
-        const labelLimit = clamp(safeNumber(options.labelLimit, 90), 0, 220);
 
-        const pad = 52;
-        const headerH = 120;
-        const sideW = Math.round(width * 0.28);
+        const pad = 48;
+        const headerH = 86;
         const mapX = pad;
-        const mapY = headerH + 8;
-        const mapW = width - pad * 2 - sideW - 18;
+        const mapY = headerH;
+        const mapW = width - pad * 2;
         const mapH = height - mapY - pad;
-        const sideX = mapX + mapW + 18;
-        const sideY = mapY;
-        const sideH = mapH;
+        const mapInset = 18;
 
         const bounds = computeBounds(routes);
-        const project = makeProjector(bounds, mapX + 22, mapY + 22, mapW - 44, mapH - 44);
+        const project = makeProjector(bounds, mapX + mapInset, mapY + mapInset, mapW - mapInset * 2, mapH - mapInset * 2);
 
         const linePaths = [];
         const points = [];
-        const labels = [];
+        const routeBoxes = [];
         routes.forEach((route, idx) => {
             const [x1, y1] = project(route.origin_lat, route.origin_lon);
             const [x2, y2] = project(route.destination_lat, route.destination_lon);
-            const { cx, cy, mx, my } = makeCurveGeometry(x1, y1, x2, y2);
+            const { cx, cy } = makeCurveGeometry(x1, y1, x2, y2);
             const color = colorForCategory(route.category, idx, categoryColors);
             linePaths.push(
-                `<path d="M ${x1.toFixed(2)} ${y1.toFixed(2)} Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${x2.toFixed(2)} ${y2.toFixed(2)}" stroke="${escapeXml(color)}" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.76"/>`
+                `<path d="M ${x1.toFixed(2)} ${y1.toFixed(2)} Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${x2.toFixed(2)} ${y2.toFixed(2)}" stroke="${escapeXml(color)}" stroke-width="2.4" stroke-linecap="round" fill="none" opacity="0.8"/>`
             );
+            routeBoxes.push(curveBox(x1, y1, cx, cy, x2, y2, 8));
             points.push(
-                `<circle cx="${x1.toFixed(2)}" cy="${y1.toFixed(2)}" r="3.1" fill="${escapeXml(colorWithAlpha(color, 0.78))}"/>`,
+                `<circle cx="${x1.toFixed(2)}" cy="${y1.toFixed(2)}" r="3" fill="${escapeXml(colorWithAlpha(color, 0.7))}"/>`,
                 `<circle cx="${x2.toFixed(2)}" cy="${y2.toFixed(2)}" r="3.6" fill="${escapeXml(color)}"/>`
             );
-            if (idx < labelLimit && route.user_name) {
-                const txt = escapeXml(route.user_name);
-                labels.push(
-                    `<text x="${mx.toFixed(2)}" y="${(my - 8).toFixed(2)}" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a" stroke="#ffffff" stroke-width="3" paint-order="stroke">${txt}</text>`
-                );
-            }
         });
 
-        const legendItems = buildCategoryLegend(routes).slice(0, 8);
+        const maxLegendItems = Math.max(3, Math.min(10, Math.floor((mapH - 120) / 24)));
+        const legendItems = buildCategoryLegend(routes).slice(0, maxLegendItems);
+        const legendTextChars = legendItems.reduce((maxChars, item) => {
+            const text = `${item[0]} ${item[1].count} 条`;
+            return Math.max(maxChars, text.length);
+        }, 4);
+        const legendPadX = 14;
+        const legendPadY = 12;
+        const legendRowH = 24;
+        const legendPanelW = clamp(legendPadX * 2 + 58 + legendTextChars * 8.3, 180, mapW * 0.5);
+        const legendPanelH = clamp(legendPadY * 2 + 26 + legendItems.length * legendRowH, 92, mapH - 30);
+        const legendRect = pickBottomRightLegendBox(mapX, mapY, mapW, mapH, legendPanelW, legendPanelH, routeBoxes, 16);
         const legendSvg = legendItems.map((item, idx) => {
             const cat = item[0];
             const stat = item[1];
             const color = colorForCategory(cat, idx, categoryColors);
-            const y = sideY + 260 + idx * 36;
+            const y = legendRect.y + legendPadY + 30 + idx * legendRowH;
             return (
-                `<circle cx="${sideX + 28}" cy="${y}" r="7" fill="${escapeXml(color)}"/>` +
-                `<text x="${sideX + 44}" y="${y + 4}" font-size="17" fill="#1f2937">${escapeXml(cat)}</text>` +
-                `<text x="${sideX + sideW - 22}" y="${y + 4}" text-anchor="end" font-size="15" fill="#475569">${escapeXml(`${stat.count} 条`)}</text>`
+                `<circle cx="${legendRect.x + legendPadX + 8}" cy="${y - 4}" r="5.5" fill="${escapeXml(color)}"/>` +
+                `<text x="${legendRect.x + legendPadX + 22}" y="${y}" font-size="13.5" fill="#1f2937">${escapeXml(cat)}</text>` +
+                `<text x="${legendRect.x + legendRect.w - legendPadX}" y="${y}" text-anchor="end" font-size="13" fill="#475569">${escapeXml(`${stat.count} 条`)}</text>`
             );
         }).join("");
 
-        const latestRoutes = [...routes]
-            .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
-            .slice(0, 6);
-        const latestRows = latestRoutes.map((route, idx) => {
-            const y = sideY + sideH - 182 + idx * 28;
-            return `<text x="${sideX + 20}" y="${y}" font-size="14" fill="#334155">${idx + 1}. ${escapeXml(routeLabel(route))}</text>`;
-        }).join("");
-
-        const nowText = new Date().toLocaleString("zh-CN", { hour12: false });
-        const ownerText = owner ? ` | 导出用户：${owner}` : "";
-        const labelStat = pickLabeledRoutes(routes, labelLimit).length;
+        const kmPerPixel = estimateKmPerPixelFromBounds(bounds, mapW - mapInset * 2);
+        const scaleSpec = createScaleSpec(kmPerPixel, (mapW - mapInset * 2) * 0.22, 70, 220);
+        const scaleX = mapX + 28;
+        const scaleY = mapY + mapH - 28;
+        const northX = mapX + mapW - 44;
+        const northY = mapY + 46;
 
         return (
             `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
             `<defs>` +
             `<linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">` +
-            `<stop offset="0%" stop-color="#f8fbff"/><stop offset="56%" stop-color="#e8f0ff"/><stop offset="100%" stop-color="#dde8ff"/>` +
+            `<stop offset="0%" stop-color="#f8fbff"/><stop offset="58%" stop-color="#edf4ff"/><stop offset="100%" stop-color="#e4eeff"/>` +
             `</linearGradient>` +
-            `<linearGradient id="panelGrad" x1="0" y1="0" x2="0" y2="1">` +
-            `<stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#f6f9ff"/>` +
+            `<linearGradient id="mapMask" x1="0" y1="0" x2="1" y2="1">` +
+            `<stop offset="0%" stop-color="rgba(30,64,175,0.08)"/><stop offset="100%" stop-color="rgba(14,165,233,0.06)"/>` +
             `</linearGradient>` +
             `<filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">` +
             `<feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#1d4ed8" flood-opacity="0.12"/>` +
@@ -231,42 +324,42 @@
             `</defs>` +
 
             `<rect x="0" y="0" width="${width}" height="${height}" fill="url(#bgGrad)"/>` +
-            `<circle cx="${(width * 0.18).toFixed(1)}" cy="${(height * 0.2).toFixed(1)}" r="${Math.round(height * 0.24)}" fill="rgba(59,130,246,0.08)"/>` +
-            `<circle cx="${(width * 0.74).toFixed(1)}" cy="${(height * 0.78).toFixed(1)}" r="${Math.round(height * 0.26)}" fill="rgba(14,165,233,0.07)"/>` +
-
-            `<text x="${pad}" y="58" font-size="40" font-weight="900" fill="#1e3a8a">${escapeXml(title)}</text>` +
-            `<text x="${pad}" y="88" font-size="20" font-weight="600" fill="#475569">${escapeXml(subtitle)}</text>` +
-            `<text x="${pad}" y="112" font-size="14" fill="#64748b">${escapeXml(nowText + ownerText)}</text>` +
+            `<text x="${pad}" y="56" font-size="38" font-weight="900" fill="#1e3a8a">${escapeXml(title)}</text>` +
 
             `<g filter="url(#softShadow)">` +
-            `<rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" rx="22" fill="url(#panelGrad)" stroke="#bfdbfe"/>` +
-            `<rect x="${sideX}" y="${sideY}" width="${sideW}" height="${sideH}" rx="22" fill="url(#panelGrad)" stroke="#bfdbfe"/>` +
+            `<rect x="${mapX}" y="${mapY}" width="${mapW}" height="${mapH}" rx="20" fill="#ffffff" stroke="#bfdbfe"/>` +
             `</g>` +
 
-            `<g opacity="0.45">` +
-            `${Array.from({ length: 9 }, (_, i) => {
-                const x = mapX + 20 + (i * (mapW - 40)) / 8;
-                return `<line x1="${x.toFixed(2)}" y1="${(mapY + 18).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(mapY + mapH - 18).toFixed(2)}" stroke="#dbeafe" stroke-width="1"/>`;
+            `<g opacity="0.35">` +
+            `${Array.from({ length: 8 }, (_, i) => {
+                const x = mapX + mapInset + (i * (mapW - mapInset * 2)) / 7;
+                return `<line x1="${x.toFixed(2)}" y1="${(mapY + mapInset).toFixed(2)}" x2="${x.toFixed(2)}" y2="${(mapY + mapH - mapInset).toFixed(2)}" stroke="#dbeafe" stroke-width="1"/>`;
             }).join("")}` +
             `${Array.from({ length: 6 }, (_, i) => {
-                const y = mapY + 20 + (i * (mapH - 40)) / 5;
-                return `<line x1="${(mapX + 18).toFixed(2)}" y1="${y.toFixed(2)}" x2="${(mapX + mapW - 18).toFixed(2)}" y2="${y.toFixed(2)}" stroke="#dbeafe" stroke-width="1"/>`;
+                const y = mapY + mapInset + (i * (mapH - mapInset * 2)) / 5;
+                return `<line x1="${(mapX + mapInset).toFixed(2)}" y1="${y.toFixed(2)}" x2="${(mapX + mapW - mapInset).toFixed(2)}" y2="${y.toFixed(2)}" stroke="#dbeafe" stroke-width="1"/>`;
             }).join("")}` +
             `</g>` +
 
+            `<rect x="${mapX + 1}" y="${mapY + 1}" width="${mapW - 2}" height="${mapH - 2}" rx="20" fill="url(#mapMask)"/>` +
             `<g>${linePaths.join("")}</g>` +
             `<g>${points.join("")}</g>` +
-            `<g>${labels.join("")}</g>` +
 
-            `<text x="${sideX + 20}" y="${sideY + 46}" font-size="26" font-weight="900" fill="#1e3a8a">导出摘要</text>` +
-            `<text x="${sideX + 20}" y="${sideY + 84}" font-size="16" fill="#334155">线路总数：${escapeXml(String(routes.length))} 条</text>` +
-            `<text x="${sideX + 20}" y="${sideY + 112}" font-size="16" fill="#334155">标注人名：${escapeXml(String(labelStat))}</text>` +
-            `<text x="${sideX + 20}" y="${sideY + 140}" font-size="16" fill="#334155">经度范围：${bounds.minLon.toFixed(2)} ~ ${bounds.maxLon.toFixed(2)}</text>` +
-            `<text x="${sideX + 20}" y="${sideY + 168}" font-size="16" fill="#334155">纬度范围：${bounds.minLat.toFixed(2)} ~ ${bounds.maxLat.toFixed(2)}</text>` +
-            `<text x="${sideX + 20}" y="${sideY + 214}" font-size="20" font-weight="800" fill="#1e3a8a">分类统计</text>` +
+            `<g>` +
+            `<rect x="${legendRect.x}" y="${legendRect.y}" width="${legendRect.w}" height="${legendRect.h}" rx="14" fill="rgba(255,255,255,0.93)" stroke="#bfdbfe"/>` +
+            `<text x="${legendRect.x + legendPadX}" y="${legendRect.y + legendPadY + 14}" font-size="18" font-weight="900" fill="#1e3a8a">图例</text>` +
             `${legendSvg}` +
-            `<text x="${sideX + 20}" y="${sideY + sideH - 208}" font-size="20" font-weight="800" fill="#1e3a8a">最近路线</text>` +
-            `${latestRows}` +
+            `</g>` +
+
+            `<g>` +
+            `<rect x="${scaleX - 10}" y="${scaleY - 22}" width="${scaleSpec.barPx + 20}" height="28" rx="8" fill="rgba(255,255,255,0.9)" stroke="#bfdbfe"/>` +
+            `<rect x="${scaleX}" y="${scaleY - 10}" width="${(scaleSpec.barPx / 2).toFixed(2)}" height="6" fill="#0f172a"/>` +
+            `<rect x="${(scaleX + scaleSpec.barPx / 2).toFixed(2)}" y="${scaleY - 10}" width="${(scaleSpec.barPx / 2).toFixed(2)}" height="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>` +
+            `<text x="${scaleX}" y="${scaleY - 14}" font-size="12" fill="#0f172a">0</text>` +
+            `<text x="${(scaleX + scaleSpec.barPx).toFixed(2)}" y="${scaleY - 14}" text-anchor="end" font-size="12" fill="#0f172a">${escapeXml(scaleSpec.label)}</text>` +
+            `</g>` +
+
+            `${drawNorthArrowSvg(northX, northY, 28)}` +
             `</svg>`
         );
     }
@@ -346,9 +439,7 @@
         const offset = Math.max(12, dist * 0.2);
         const cx = (p1.x + p2.x) / 2 + (dy / dist) * offset;
         const cy = (p1.y + p2.y) / 2 - (dx / dist) * offset;
-        const mx = 0.25 * p1.x + 0.5 * cx + 0.25 * p2.x;
-        const my = 0.25 * p1.y + 0.5 * cy + 0.25 * p2.y;
-        return { p1, p2, c: { x: cx, y: cy }, m: { x: mx, y: my } };
+        return { p1, p2, c: { x: cx, y: cy } };
     }
 
     async function drawLeafletTiles(ctx, map, mapX, mapY, drawScale, cornerRadius) {
@@ -377,30 +468,58 @@
         ctx.restore();
     }
 
-    function drawNameTag(ctx, text, x, y, mapX, mapY, mapW, mapH, scale) {
-        const clean = String(text || "").trim();
-        if (!clean) return;
-        if (x < mapX + 12 * scale || x > mapX + mapW - 12 * scale) return;
-        if (y < mapY + 12 * scale || y > mapY + mapH - 12 * scale) return;
-        const clipped = clean.length > 14 ? `${clean.slice(0, 13)}...` : clean;
-        ctx.font = `700 ${Math.round(10.5 * scale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        const textW = ctx.measureText(clipped).width;
-        const padX = 6 * scale;
-        const boxW = textW + padX * 2;
-        const boxH = 16 * scale;
-        const bx = x - boxW / 2;
-        const by = y - boxH - 4 * scale;
-
+    function drawNorthArrowCanvas(ctx, x, y, size) {
+        const half = size / 2;
         ctx.save();
-        drawRoundedRect(ctx, bx, by, boxW, boxH, 6 * scale);
-        ctx.fillStyle = "rgba(255,255,255,0.88)";
+        ctx.beginPath();
+        ctx.arc(x, y, half + 8, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
         ctx.fill();
-        ctx.strokeStyle = "rgba(59,130,246,0.32)";
-        ctx.lineWidth = 1 * scale;
+        ctx.strokeStyle = "#bfdbfe";
+        ctx.lineWidth = 1.2;
         ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x, y - half);
+        ctx.lineTo(x - half * 0.42, y + half * 0.56);
+        ctx.lineTo(x, y + half * 0.2);
+        ctx.lineTo(x + half * 0.42, y + half * 0.56);
+        ctx.closePath();
+        ctx.fillStyle = "#1d4ed8";
+        ctx.fill();
+
+        ctx.fillStyle = "#1e3a8a";
+        ctx.font = `800 ${Math.max(10, Math.round(size * 0.36))}px "MiSans","Microsoft YaHei",sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText("N", x, y - half - 8);
+        ctx.restore();
+    }
+
+    function drawScaleBarCanvas(ctx, spec, x, y) {
+        const width = spec.barPx;
+        const half = width / 2;
+        ctx.save();
+        drawRoundedRect(ctx, x - 10, y - 22, width + 20, 28, 8);
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.fill();
+        ctx.strokeStyle = "#bfdbfe";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
         ctx.fillStyle = "#0f172a";
-        ctx.textBaseline = "middle";
-        ctx.fillText(clipped, bx + padX, by + boxH / 2);
+        ctx.fillRect(x, y - 10, half, 6);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x + half, y - 10, half, 6);
+        ctx.strokeStyle = "#0f172a";
+        ctx.strokeRect(x + half, y - 10, half, 6);
+
+        ctx.fillStyle = "#0f172a";
+        ctx.font = `600 12px "MiSans","Microsoft YaHei",sans-serif`;
+        ctx.textAlign = "left";
+        ctx.fillText("0", x, y - 14);
+        ctx.textAlign = "right";
+        ctx.fillText(spec.label, x + width, y - 14);
         ctx.restore();
     }
 
@@ -422,17 +541,13 @@
         const drawScale = clamp(mapScale * qualityScale, 1.4, 5);
 
         const pad = 28 * drawScale;
-        const headerH = 88 * drawScale;
+        const headerH = 72 * drawScale;
         const mapW = mapSize.x * drawScale;
         const mapH = mapSize.y * drawScale;
-        const sideW = Math.max(300 * drawScale, Math.min(500 * drawScale, mapW * 0.34));
-        const width = Math.round(mapW + sideW + pad * 3);
+        const width = Math.round(mapW + pad * 2);
         const height = Math.round(mapH + headerH + pad * 2);
         const mapX = pad;
         const mapY = headerH + pad * 0.55;
-        const sideX = mapX + mapW + pad;
-        const sideY = mapY;
-        const sideH = mapH;
         const cornerRadius = 22 * drawScale;
 
         const canvas = document.createElement("canvas");
@@ -444,30 +559,14 @@
         ctx.imageSmoothingQuality = "high";
 
         const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-        bgGrad.addColorStop(0, "#f7fbff");
-        bgGrad.addColorStop(0.56, "#e8f1ff");
-        bgGrad.addColorStop(1, "#dde9ff");
+        bgGrad.addColorStop(0, "#f8fbff");
+        bgGrad.addColorStop(0.58, "#edf4ff");
+        bgGrad.addColorStop(1, "#e4eeff");
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, width, height);
 
-        ctx.fillStyle = "rgba(59,130,246,0.08)";
-        ctx.beginPath();
-        ctx.arc(width * 0.18, height * 0.2, height * 0.24, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "rgba(14,165,233,0.07)";
-        ctx.beginPath();
-        ctx.arc(width * 0.76, height * 0.78, height * 0.25, 0, Math.PI * 2);
-        ctx.fill();
-
         drawRoundedRect(ctx, mapX, mapY, mapW, mapH, cornerRadius);
         ctx.fillStyle = "#ffffff";
-        ctx.fill();
-        ctx.strokeStyle = "#bfdbfe";
-        ctx.lineWidth = 1.2 * drawScale;
-        ctx.stroke();
-
-        drawRoundedRect(ctx, sideX, sideY, sideW, sideH, cornerRadius);
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.fill();
         ctx.strokeStyle = "#bfdbfe";
         ctx.lineWidth = 1.2 * drawScale;
@@ -480,111 +579,105 @@
         ctx.clip();
         const overlay = ctx.createLinearGradient(mapX, mapY, mapX + mapW, mapY + mapH);
         overlay.addColorStop(0, "rgba(30,64,175,0.06)");
-        overlay.addColorStop(1, "rgba(15,118,110,0.04)");
+        overlay.addColorStop(1, "rgba(14,165,233,0.05)");
         ctx.fillStyle = overlay;
         ctx.fillRect(mapX, mapY, mapW, mapH);
         ctx.restore();
 
         const categoryColors = options.categoryColors || {};
+        const routeBoxes = [];
         routes.forEach((route, idx) => {
             const color = colorForCategory(route.category, idx, categoryColors);
             const { p1, p2, c } = routeCurvePoints(route, map);
+            const x1 = mapX + p1.x * drawScale;
+            const y1 = mapY + p1.y * drawScale;
+            const x2 = mapX + p2.x * drawScale;
+            const y2 = mapY + p2.y * drawScale;
+            const cx = mapX + c.x * drawScale;
+            const cy = mapY + c.y * drawScale;
+
             ctx.beginPath();
-            ctx.moveTo(mapX + p1.x * drawScale, mapY + p1.y * drawScale);
-            ctx.quadraticCurveTo(
-                mapX + c.x * drawScale,
-                mapY + c.y * drawScale,
-                mapX + p2.x * drawScale,
-                mapY + p2.y * drawScale
-            );
-            ctx.strokeStyle = colorWithAlpha(color, 0.74);
-            ctx.lineWidth = 3.2 * drawScale;
+            ctx.moveTo(x1, y1);
+            ctx.quadraticCurveTo(cx, cy, x2, y2);
+            ctx.strokeStyle = colorWithAlpha(color, 0.78);
+            ctx.lineWidth = 3.1 * drawScale;
             ctx.lineCap = "round";
             ctx.stroke();
 
+            routeBoxes.push(curveBox(x1, y1, cx, cy, x2, y2, 8 * drawScale));
+
             ctx.beginPath();
             ctx.fillStyle = colorWithAlpha(color, 0.95);
-            ctx.arc(mapX + p2.x * drawScale, mapY + p2.y * drawScale, 4 * drawScale, 0, Math.PI * 2);
+            ctx.arc(x2, y2, 4 * drawScale, 0, Math.PI * 2);
             ctx.fill();
         });
 
-        const labelLimit = clamp(safeNumber(options.labelLimit, 90), 0, 220);
-        pickLabeledRoutes(routes, labelLimit).forEach((route) => {
-            const { m } = routeCurvePoints(route, map);
-            drawNameTag(
-                ctx,
-                route.user_name,
-                mapX + m.x * drawScale,
-                mapY + m.y * drawScale,
-                mapX,
-                mapY,
-                mapW,
-                mapH,
-                drawScale
-            );
-        });
-
-        const owner = options.owner ? ` | 导出用户：${options.owner}` : "";
-        const subtitle = options.subtitle || "地图底图 + OD 线路导出";
         const title = options.title || "OD 流向图";
-
         ctx.fillStyle = "#1e3a8a";
         ctx.font = `900 ${Math.round(34 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
         ctx.fillText(title, pad, 46 * drawScale);
-        ctx.fillStyle = "#475569";
-        ctx.font = `600 ${Math.round(16 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        ctx.fillText(subtitle, pad, 72 * drawScale);
-        ctx.fillStyle = "#64748b";
-        ctx.font = `${Math.round(12 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        ctx.fillText(`${new Date().toLocaleString("zh-CN", { hour12: false })}${owner}`, pad, 92 * drawScale);
 
-        const legendItems = buildCategoryLegend(routes).slice(0, 8);
-        ctx.fillStyle = "#1e3a8a";
-        ctx.font = `900 ${Math.round(22 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        ctx.fillText("导出摘要", sideX + 18 * drawScale, sideY + 34 * drawScale);
-        ctx.fillStyle = "#334155";
-        ctx.font = `${Math.round(14 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        ctx.fillText(`线路总数：${routes.length} 条`, sideX + 18 * drawScale, sideY + 62 * drawScale);
-        ctx.fillText(`标注人名：${pickLabeledRoutes(routes, labelLimit).length}`, sideX + 18 * drawScale, sideY + 86 * drawScale);
-        ctx.fillText(`底图模式：${options.baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}`, sideX + 18 * drawScale, sideY + 110 * drawScale);
+        const maxLegendItems = Math.max(3, Math.min(10, Math.floor((mapH - 120 * drawScale) / (26 * drawScale))));
+        const legendItems = buildCategoryLegend(routes).slice(0, maxLegendItems);
+        const legendPadX = 14 * drawScale;
+        const legendPadY = 12 * drawScale;
+        const legendRowH = 24 * drawScale;
+
+        ctx.save();
+        ctx.font = `${Math.round(13 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
+        const maxTextWidth = legendItems.reduce((maxW, item) => {
+            const label = `${item[0]}  ${item[1].count} 条`;
+            return Math.max(maxW, ctx.measureText(label).width);
+        }, 90 * drawScale);
+        ctx.restore();
+
+        const legendPanelW = clamp(legendPadX * 2 + 22 * drawScale + maxTextWidth, 180 * drawScale, mapW * 0.5);
+        const legendPanelH = clamp(legendPadY * 2 + 28 * drawScale + legendItems.length * legendRowH, 92 * drawScale, mapH - 30 * drawScale);
+        const legendRect = pickBottomRightLegendBox(mapX, mapY, mapW, mapH, legendPanelW, legendPanelH, routeBoxes, 16 * drawScale);
+
+        drawRoundedRect(ctx, legendRect.x, legendRect.y, legendRect.w, legendRect.h, 14 * drawScale);
+        ctx.fillStyle = "rgba(255,255,255,0.93)";
+        ctx.fill();
+        ctx.strokeStyle = "#bfdbfe";
+        ctx.lineWidth = 1.1 * drawScale;
+        ctx.stroke();
 
         ctx.fillStyle = "#1e3a8a";
-        ctx.font = `800 ${Math.round(17 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        ctx.fillText("分类统计", sideX + 18 * drawScale, sideY + 146 * drawScale);
+        ctx.font = `900 ${Math.round(18 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText("图例", legendRect.x + legendPadX, legendRect.y + legendPadY + 13 * drawScale);
 
         legendItems.forEach((item, idx) => {
-            const y = sideY + 172 * drawScale + idx * 28 * drawScale;
+            const y = legendRect.y + legendPadY + 31 * drawScale + idx * legendRowH;
             const cat = item[0];
             const stat = item[1];
             const color = colorForCategory(cat, idx, categoryColors);
+
             ctx.fillStyle = color;
             ctx.beginPath();
-            ctx.arc(sideX + 24 * drawScale, y - 5 * drawScale, 5 * drawScale, 0, Math.PI * 2);
+            ctx.arc(legendRect.x + legendPadX + 8 * drawScale, y - 4 * drawScale, 5 * drawScale, 0, Math.PI * 2);
             ctx.fill();
+
             ctx.fillStyle = "#1f2937";
-            ctx.font = `${Math.round(14 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-            ctx.fillText(cat, sideX + 36 * drawScale, y);
+            ctx.font = `${Math.round(13 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
+            ctx.textAlign = "left";
+            ctx.fillText(cat, legendRect.x + legendPadX + 21 * drawScale, y);
+
             ctx.fillStyle = "#475569";
-            const txt = `${stat.count} 条`;
-            const txtW = ctx.measureText(txt).width;
-            ctx.fillText(txt, sideX + sideW - 16 * drawScale - txtW, y);
+            ctx.textAlign = "right";
+            ctx.fillText(`${stat.count} 条`, legendRect.x + legendRect.w - legendPadX, y);
         });
 
-        const latestRoutes = [...routes]
-            .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
-            .slice(0, 7);
-        const topHeadY = sideY + sideH - 220 * drawScale;
-        ctx.fillStyle = "#1e3a8a";
-        ctx.font = `800 ${Math.round(17 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        ctx.fillText("最近路线", sideX + 18 * drawScale, topHeadY);
-        ctx.fillStyle = "#334155";
-        ctx.font = `${Math.round(12 * drawScale)}px "MiSans","Microsoft YaHei",sans-serif`;
-        latestRoutes.forEach((route, idx) => {
-            const y = topHeadY + 24 * drawScale + idx * 22 * drawScale;
-            const label = `${idx + 1}. ${routeLabel(route)}`;
-            const clipped = label.length > 38 ? `${label.slice(0, 37)}...` : label;
-            ctx.fillText(clipped, sideX + 18 * drawScale, y);
-        });
+        const kmPerPixel = estimateKmPerPixelFromMap(map, mapSize) || estimateKmPerPixelFromBounds(computeBounds(routes), mapSize.x);
+        const scaleSpec = createScaleSpec(kmPerPixel, mapSize.x * 0.22, 70, 220);
+        drawScaleBarCanvas(
+            ctx,
+            { barPx: scaleSpec.barPx * drawScale, label: scaleSpec.label },
+            mapX + 28 * drawScale,
+            mapY + mapH - 18 * drawScale
+        );
+        drawNorthArrowCanvas(ctx, mapX + mapW - 40 * drawScale, mapY + 40 * drawScale, 28 * drawScale);
 
         return canvas;
     }

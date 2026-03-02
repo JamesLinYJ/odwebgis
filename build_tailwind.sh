@@ -10,6 +10,7 @@ OUTPUT_FILE="${TAILWIND_OUTPUT_FILE:-static/css/tailwind.generated.css}"
 CONFIG_FILE="${TAILWIND_CONFIG_FILE:-tailwind.config.js}"
 NPM_BIN="${NPM_BIN:-npm}"
 TAILWIND_USE_STANDALONE="${TAILWIND_USE_STANDALONE:-0}"
+NPM_TIMEOUT_SECONDS="${NPM_TIMEOUT_SECONDS:-180}"
 
 download_file() {
   local url="$1"
@@ -32,9 +33,25 @@ resolve_tailwind_bin() {
       if [[ ! -x "$ROOT_DIR/node_modules/.bin/tailwindcss" ]]; then
         echo "[INFO] Installing Node dependencies for Tailwind build ..." >&2
         if [[ -f "$ROOT_DIR/package-lock.json" ]]; then
-          "$NPM_BIN" ci --no-audit --no-fund >&2
+          if command -v timeout >/dev/null 2>&1; then
+            if ! timeout --foreground "${NPM_TIMEOUT_SECONDS}s" "$NPM_BIN" ci --no-audit --no-fund >&2; then
+              echo "[WARN] npm ci failed or timed out, falling back to standalone Tailwind binary." >&2
+            fi
+          else
+            if ! "$NPM_BIN" ci --no-audit --no-fund >&2; then
+              echo "[WARN] npm ci failed, falling back to standalone Tailwind binary." >&2
+            fi
+          fi
         else
-          "$NPM_BIN" install --no-audit --no-fund >&2
+          if command -v timeout >/dev/null 2>&1; then
+            if ! timeout --foreground "${NPM_TIMEOUT_SECONDS}s" "$NPM_BIN" install --no-audit --no-fund >&2; then
+              echo "[WARN] npm install failed or timed out, falling back to standalone Tailwind binary." >&2
+            fi
+          else
+            if ! "$NPM_BIN" install --no-audit --no-fund >&2; then
+              echo "[WARN] npm install failed, falling back to standalone Tailwind binary." >&2
+            fi
+          fi
         fi
       fi
       if [[ -x "$ROOT_DIR/node_modules/.bin/tailwindcss" ]]; then

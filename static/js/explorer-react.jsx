@@ -22,6 +22,33 @@ function buildCurve(start, end, segments = 40) {
   return points;
 }
 
+function attachMapDecorControls(map) {
+  if (!map || !window.L) return;
+
+  const northControl = L.control({ position: "bottomright" });
+  northControl.onAdd = () => {
+    const container = L.DomUtil.create("div", "leaflet-control leaflet-control-north");
+    container.innerHTML = `
+      <div class="north-indicator" aria-label="指北针" title="北向">
+        <span class="north-indicator-arrow"></span>
+        <span class="north-indicator-text">N</span>
+      </div>
+    `;
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
+    return container;
+  };
+  northControl.addTo(map);
+
+  L.control.scale({
+    position: "bottomright",
+    metric: true,
+    imperial: false,
+    maxWidth: 140,
+    updateWhenIdle: true,
+  }).addTo(map);
+}
+
 function normalizeCoordText(raw) {
   return String(raw || "")
     .trim()
@@ -121,6 +148,68 @@ function parseDmsParts(parts, axis, prefix = "") {
   return Number(value.toFixed(8));
 }
 
+const GCJ_A = 6378245.0;
+const GCJ_EE = 0.00669342162296594323;
+
+function outOfChina(lat, lon) {
+  return lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271;
+}
+
+function transformLatOffset(x, y) {
+  let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+  ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  ret += ((20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin((y / 3.0) * Math.PI)) * 2.0) / 3.0;
+  ret += ((160.0 * Math.sin((y / 12.0) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30.0)) * 2.0) / 3.0;
+  return ret;
+}
+
+function transformLonOffset(x, y) {
+  let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+  ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  ret += ((20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin((x / 3.0) * Math.PI)) * 2.0) / 3.0;
+  ret += ((150.0 * Math.sin((x / 12.0) * Math.PI) + 300.0 * Math.sin((x / 30.0) * Math.PI)) * 2.0) / 3.0;
+  return ret;
+}
+
+function wgs84ToGcj02(lat, lon) {
+  if (outOfChina(lat, lon)) return [Number(lat), Number(lon)];
+  const dLat = transformLatOffset(lon - 105.0, lat - 35.0);
+  const dLon = transformLonOffset(lon - 105.0, lat - 35.0);
+  const radLat = (lat / 180.0) * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - GCJ_EE * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  const mgLat = lat + (dLat * 180.0) / (((GCJ_A * (1 - GCJ_EE)) / (magic * sqrtMagic)) * Math.PI);
+  const mgLon = lon + (dLon * 180.0) / ((GCJ_A / sqrtMagic) * Math.cos(radLat) * Math.PI);
+  return [Number(mgLat.toFixed(8)), Number(mgLon.toFixed(8))];
+}
+
+function gcj02ToWgs84(lat, lon) {
+  if (outOfChina(lat, lon)) return [Number(lat), Number(lon)];
+  let wgsLat = Number(lat);
+  let wgsLon = Number(lon);
+  for (let i = 0; i < 2; i += 1) {
+    const [tmpLat, tmpLon] = wgs84ToGcj02(wgsLat, wgsLon);
+    wgsLat -= tmpLat - lat;
+    wgsLon -= tmpLon - lon;
+  }
+  return [Number(wgsLat.toFixed(8)), Number(wgsLon.toFixed(8))];
+}
+
+function normalizeCoordSystem(value) {
+  const text = String(value || "").trim().toLowerCase();
+  const compact = text.replace(/[-_]/g, "");
+  if (compact === "gcj02" || compact === "gcj" || text === "火星坐标" || text === "火星坐标系") return "gcj02";
+  return "wgs84";
+}
+
+function convertToWgs84(lat, lon, coordSystem) {
+  if (normalizeCoordSystem(coordSystem) === "gcj02") {
+    return gcj02ToWgs84(lat, lon);
+  }
+  return [Number(lat), Number(lon)];
+}
+
 function createEndpointState() {
   return {
     name: "",
@@ -176,6 +265,20 @@ function DmsAxisInput({ axis, value, onChange }) {
   );
 }
 
+function CampusShortcutCard({ campus, onPickOrigin, onPickDestination, onLocate }) {
+  return (
+    <div className="rounded-xl border border-blue-100 bg-gradient-to-br from-white to-blue-50/60 p-2.5">
+      <div className="text-xs font-black text-slate-700">{campus.name}</div>
+      <div className="mt-0.5 text-[11px] font-semibold text-slate-500">{formatCoord(campus.lat_wgs84 ?? campus.lat, campus.lon_wgs84 ?? campus.lon)}</div>
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
+        <button type="button" onClick={onPickOrigin} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-[11px] font-bold text-brand-700">设 O</button>
+        <button type="button" onClick={onPickDestination} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-[11px] font-bold text-brand-700">设 D</button>
+        <button type="button" onClick={onLocate} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-[11px] font-bold text-brand-700">定位</button>
+      </div>
+    </div>
+  );
+}
+
 function EndpointEditor({ title, endpoint, setEndpoint, coordMode }) {
   return (
     <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
@@ -223,6 +326,7 @@ function ExplorerApp() {
   const [showOnlyMine, setShowOnlyMine] = useState(true);
 
   const [coordMode, setCoordMode] = useState("decimal");
+  const [inputCoordSystem, setInputCoordSystem] = useState("wgs84");
   const [originInput, setOriginInput] = useState(createEndpointState());
   const [destinationInput, setDestinationInput] = useState(createEndpointState());
   const [routeCategory, setRouteCategory] = useState("课堂");
@@ -237,8 +341,17 @@ function ExplorerApp() {
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const [exportingPoster, setExportingPoster] = useState(false);
   const [baseMapMode, setBaseMapMode] = useState("vector");
+  const [isCompactScreen, setIsCompactScreen] = useState(false);
+  const layoutAutoInitRef = useRef(false);
 
   const categoryColors = useMemo(() => ({ 课堂: "#2563eb", 通勤: "#0891b2", 调研: "#7c3aed", 实习: "#f97316", 其他: "#4b5563" }), []);
+  const campusShortcuts = useMemo(() => ([
+    { key: "hznu-cangqian", name: "杭州师范大学仓前校区", lat: 30.29577, lon: 120.01963, coord_system: "gcj02" },
+    { key: "hznu-xiasha", name: "杭州师范大学下沙校区", lat: 30.315002, lon: 120.393968, coord_system: "gcj02" },
+  ].map((item) => {
+    const [lat_wgs84, lon_wgs84] = convertToWgs84(item.lat, item.lon, item.coord_system || "wgs84");
+    return { ...item, lat_wgs84, lon_wgs84 };
+  })), []);
 
   const allCategories = useMemo(() => {
     const dynamic = Array.from(new Set(allRoutes.map((r) => r.category).filter(Boolean)));
@@ -289,19 +402,57 @@ function ExplorerApp() {
     return String(endpoint.dms.lat.deg || "").trim() || String(endpoint.dms.lon.deg || "").trim();
   }
 
-  function parseEndpoint(endpoint, prefix) {
+  function parseEndpointRaw(endpoint, prefix) {
     const lat = coordMode === "decimal"
       ? parseFlexibleCoordinate(endpoint.decimal.lat, "lat")
       : parseDmsParts(endpoint.dms.lat, "lat", prefix);
     const lon = coordMode === "decimal"
       ? parseFlexibleCoordinate(endpoint.decimal.lon, "lon")
       : parseDmsParts(endpoint.dms.lon, "lon", prefix);
+    return { lat, lon };
+  }
+
+  function parseEndpoint(endpoint, prefix) {
+    const raw = parseEndpointRaw(endpoint, prefix);
+    const [lat, lon] = convertToWgs84(raw.lat, raw.lon, inputCoordSystem);
     return { name: endpoint.name.trim() || `${prefix}点`, lat, lon };
   }
 
   function parseEndpointIfFilled(endpoint, prefix) {
     if (!endpointHasAnyInput(endpoint)) return null;
     return parseEndpoint(endpoint, prefix);
+  }
+
+  function convertEndpointInputSystem(endpoint, fromSystem, toSystem, prefix) {
+    try {
+      const raw = parseEndpointRaw(endpoint, prefix);
+      const [wgsLat, wgsLon] = convertToWgs84(raw.lat, raw.lon, fromSystem);
+      const [nextLat, nextLon] = normalizeCoordSystem(toSystem) === "gcj02"
+        ? wgs84ToGcj02(wgsLat, wgsLon)
+        : [wgsLat, wgsLon];
+      return {
+        ...endpoint,
+        decimal: {
+          lat: String(Number(nextLat.toFixed(6))),
+          lon: String(Number(nextLon.toFixed(6))),
+        },
+        dms: {
+          lat: toDmsParts(nextLat, "lat"),
+          lon: toDmsParts(nextLon, "lon"),
+        },
+      };
+    } catch {
+      return endpoint;
+    }
+  }
+
+  function switchInputCoordSystem(nextSystem) {
+    const normalizedNext = normalizeCoordSystem(nextSystem);
+    if (normalizedNext === inputCoordSystem) return;
+    const fromSystem = inputCoordSystem;
+    setOriginInput((prev) => convertEndpointInputSystem(prev, fromSystem, normalizedNext, "起点"));
+    setDestinationInput((prev) => convertEndpointInputSystem(prev, fromSystem, normalizedNext, "终点"));
+    setInputCoordSystem(normalizedNext);
   }
 
   function syncModeValues(targetMode) {
@@ -367,6 +518,22 @@ function ExplorerApp() {
   useEffect(() => { bootstrap(); }, []);
 
   useEffect(() => {
+    const updateLayout = () => {
+      const compact = window.matchMedia("(max-width: 1280px)").matches;
+      setIsCompactScreen(compact);
+      if (!layoutAutoInitRef.current) {
+        setFilterOpen(!compact);
+        setRecentOpen(!compact);
+        setEntryOpen(true);
+        layoutAutoInitRef.current = true;
+      }
+    };
+    updateLayout();
+    window.addEventListener("resize", updateLayout);
+    return () => window.removeEventListener("resize", updateLayout);
+  }, []);
+
+  useEffect(() => {
     if (!mapHostRef.current || mapRef.current) return;
     const map = L.map(mapHostRef.current, { zoomControl: false, minZoom: 4, attributionControl: false }).setView([35.2, 104.2], 5);
     const chinaBounds = [[18.0, 73.0], [54.5, 135.5]];
@@ -379,6 +546,7 @@ function ExplorerApp() {
     cva.addTo(map);
     baseTileLayersRef.current = { vec, cva, img, cia };
     map.fitBounds(chinaBounds, { padding: [18, 18] });
+    attachMapDecorControls(map);
     mapRef.current = map;
     routeLayerRef.current = L.layerGroup().addTo(map);
     draftLayerRef.current = L.layerGroup().addTo(map);
@@ -478,10 +646,10 @@ function ExplorerApp() {
 
       line.bindPopup(
         `<div style="min-width:190px">` +
-          `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
-          `分类：${route.category}<br/>` +
-          `录入学生：${route.user_name || "-"}<br/>` +
-          `时间：${api.fmtTime(route.created_at)}` +
+        `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
+        `分类：${route.category}<br/>` +
+        `录入学生：${route.user_name || "-"}<br/>` +
+        `时间：${api.fmtTime(route.created_at)}` +
         `</div>`
       );
 
@@ -632,6 +800,38 @@ function ExplorerApp() {
     }
   }
 
+  function applyCampusShortcut(campus, target = "auto") {
+    if (!campus) return;
+    const targetLat = Number.isFinite(campus.lat_wgs84) ? campus.lat_wgs84 : campus.lat;
+    const targetLon = Number.isFinite(campus.lon_wgs84) ? campus.lon_wgs84 : campus.lon;
+    const targetPoint = [targetLat, targetLon];
+    let applyTarget = target;
+    if (applyTarget === "auto") {
+      if (pickTarget === "origin" || pickTarget === "destination") {
+        applyTarget = pickTarget;
+      } else if (!originPoint) {
+        applyTarget = "origin";
+      } else if (!destinationPoint) {
+        applyTarget = "destination";
+      } else {
+        applyTarget = "destination";
+      }
+    }
+    if (applyTarget === "origin") {
+      syncEndpointFromDecimal("origin", targetLat, targetLon, campus.name);
+      if (pickTarget === "origin") setPickTarget("destination");
+      api.notify(`已将 ${campus.name} 设为起点 O`);
+    } else {
+      syncEndpointFromDecimal("destination", targetLat, targetLon, campus.name);
+      if (pickTarget === "destination") setPickTarget(null);
+      api.notify(`已将 ${campus.name} 设为终点 D`);
+    }
+    if (mapRef.current) {
+      const zoom = Math.max(mapRef.current.getZoom(), 14);
+      mapRef.current.setView(targetPoint, zoom, { animate: true });
+    }
+  }
+
   function clearInputs() {
     setOriginInput(createEndpointState());
     setDestinationInput(createEndpointState());
@@ -665,9 +865,12 @@ function ExplorerApp() {
         origin_name: origin.name,
         origin_lat: origin.lat,
         origin_lon: origin.lon,
+        origin_coord_system: "wgs84",
         destination_name: destination.name,
         destination_lat: destination.lat,
         destination_lon: destination.lon,
+        destination_coord_system: "wgs84",
+        coord_system: "wgs84",
         category: routeCategory,
       });
 
@@ -702,26 +905,30 @@ function ExplorerApp() {
     window.location.href = "/auth";
   }
   return (
-    <div className="mx-auto max-w-[1880px] p-3 sm:p-4 ios-fade-up">
+    <div className="relative mx-auto max-w-[1880px] p-3 sm:p-4 ios-fade-up">
+      <div className="pointer-events-none absolute -left-16 -top-10 h-36 w-36 rounded-full bg-cyan-200/35 blur-3xl" />
+      <div className="pointer-events-none absolute -right-8 top-12 h-28 w-28 rounded-full bg-blue-200/35 blur-3xl" />
       <header className="ios-card mb-3 rounded-2xl border border-blue-100 bg-white/95 px-4 py-3 shadow-soft">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-xl font-black text-brand-700 sm:text-2xl">OD 流向录入与分析</div>
-            <div className="text-xs font-semibold text-slate-500 sm:text-sm">学生端 | 地图点选、十进制度与度分秒双模式录入</div>
+            <div className="text-xs font-semibold text-slate-500 sm:text-sm">支持地图点选与十进制度/度分秒输入</div>
             {me && <div className="text-xs font-semibold text-slate-500">当前用户：{me.username || "-"}</div>}
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => Promise.all([loadMe(), loadRoutes()])} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">刷新</button>
-            <button onClick={generateOdMap} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">一键生成OD图</button>
-            <button onClick={() => exportOdPoster("png")} disabled={exportingPoster} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 disabled:opacity-60 sm:text-sm">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
-            <button onClick={() => window.location.href = "/account"} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">账户中心</button>
-            <button onClick={logout} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">退出登录</button>
+          <div className="w-full sm:w-auto">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
+              <button onClick={() => Promise.all([loadMe(), loadRoutes()])} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">刷新</button>
+              <button onClick={generateOdMap} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">生成 OD 图</button>
+              <button onClick={() => exportOdPoster("png")} disabled={exportingPoster} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 disabled:opacity-60 sm:text-sm">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
+              <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">账户中心</button>
+              <button onClick={logout} className="shrink-0 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 sm:text-sm">退出登录</button>
+            </div>
           </div>
         </div>
       </header>
 
-      <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 xl:grid-cols-[1fr_400px]"}>
-        <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "relative h-[58vh] min-h-[340px] overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-soft sm:h-[72vh] sm:min-h-[560px]"} ios-card`}>
+      <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_430px]"}>
+        <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "relative h-[56vh] min-h-[340px] overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-soft sm:h-[68vh] sm:min-h-[520px] lg:h-[calc(100vh-212px)] lg:min-h-[560px] xl:min-h-[620px]"} ios-card`}>
           <div ref={mapHostRef} className="h-full w-full" />
 
           <div className="absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
@@ -732,110 +939,140 @@ function ExplorerApp() {
             <button onClick={toggleMapFullscreen} className="rounded-xl border border-blue-200 bg-white/95 px-3 py-1.5 text-xs font-black text-brand-700 sm:text-sm">{mapFullscreen ? "退出全屏" : "全屏"}</button>
           </div>
 
-          <div className="absolute right-3 top-3 z-[900] w-[min(90vw,320px)] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft sm:right-4 sm:top-4">
-            <div className="text-xs font-bold tracking-wide text-slate-500">地图交互状态</div>
+          <div className="absolute right-3 top-3 z-[900] w-[min(92vw,340px)] rounded-xl border border-blue-100 bg-white/95 p-3 shadow-soft sm:right-4 sm:top-4 xl:w-[360px]">
+            <div className="text-xs font-bold tracking-wide text-slate-500">当前操作状态</div>
             <div className="mt-1 text-sm font-bold text-slate-700">
               {pickTarget === "origin" && "点击地图设置起点 O"}
               {pickTarget === "destination" && "点击地图设置终点 D"}
               {!pickTarget && "可手动输入或点击下方按钮开始点选"}
             </div>
-            <div className="mt-1 text-xs font-semibold text-slate-500">可拖拽 O/D 标记进行微调，操作更直观。</div>
-            <div className="mt-2 text-xs font-semibold text-slate-500">O: {originPoint ? formatCoord(originPoint[0], originPoint[1]) : "未设置"}</div>
-            <div className="text-xs font-semibold text-slate-500">D: {destinationPoint ? formatCoord(destinationPoint[0], destinationPoint[1]) : "未设置"}</div>
+            <div className="mt-1 text-xs font-semibold text-slate-500">可拖拽 O/D 标记微调坐标。</div>
+            <div className="mt-2 text-xs font-semibold text-slate-500">O（WGS84）: {originPoint ? formatCoord(originPoint[0], originPoint[1]) : "未设置"}</div>
+            <div className="text-xs font-semibold text-slate-500">D（WGS84）: {destinationPoint ? formatCoord(destinationPoint[0], destinationPoint[1]) : "未设置"}</div>
+            <div className="text-xs font-semibold text-slate-500">输入坐标系：{inputCoordSystem === "gcj02" ? "GCJ-02" : "WGS84"}</div>
             <div className="text-xs font-semibold text-slate-500">底图：{baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}</div>
           </div>
         </section>
 
         {!mapFullscreen && (
-          <aside className="space-y-3">
-            <SectionCard
-              title="筛选与交互"
-              open={filterOpen}
-              onToggle={() => setFilterOpen((v) => !v)}
-              rightNode={<span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-brand-700">{api.fmtNumber(visibleRoutes.length)} 条</span>}
-            >
-              <div className="space-y-2">
-                <input value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)} className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm" placeholder="搜索起点、终点或分类" />
+          <aside className="space-y-3 lg:h-[calc(100vh-212px)] lg:overflow-hidden">
+            <div className="space-y-3 lg:h-full lg:overflow-y-auto lg:pr-1">
+              <SectionCard
+                title="筛选与交互"
+                open={filterOpen}
+                onToggle={() => setFilterOpen((v) => !v)}
+                rightNode={<span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-brand-700">{api.fmtNumber(visibleRoutes.length)} 条</span>}
+              >
+                <div className="space-y-2">
+                  <input value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)} className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm" placeholder="搜索起点、终点或分类" />
 
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/50 px-2 py-1.5 text-xs font-semibold text-slate-700">
-                    <input type="checkbox" checked={showOnlyMine} onChange={(e) => setShowOnlyMine(e.target.checked)} />仅看我的线路
-                  </label>
-                  <select value={routeCategoryFilter} onChange={(e) => setRouteCategoryFilter(e.target.value)} className="rounded-lg border border-blue-200 px-2 py-1.5 text-xs">
-                    <option value="all">全部分类</option>
-                    {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
-                  </select>
-                </div>
-
-                <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
-                  <div className="mb-2 text-xs font-bold text-slate-600">坐标输入模式</div>
-                  <div className="grid grid-cols-2 gap-1 rounded-lg bg-blue-100/70 p-1">
-                    <button type="button" onClick={() => { setCoordMode("decimal"); syncModeValues("decimal"); }} className={`rounded-md px-2 py-1.5 text-xs font-bold ${coordMode === "decimal" ? "bg-white text-brand-700" : "text-slate-500"}`}>十进制度</button>
-                    <button type="button" onClick={() => { setCoordMode("dms"); syncModeValues("dms"); }} className={`rounded-md px-2 py-1.5 text-xs font-bold ${coordMode === "dms" ? "bg-white text-brand-700" : "text-slate-500"}`}>度分秒</button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50/50 px-2 py-1.5 text-xs font-semibold text-slate-700">
+                      <input type="checkbox" checked={showOnlyMine} onChange={(e) => setShowOnlyMine(e.target.checked)} />仅看我的线路
+                    </label>
+                    <select value={routeCategoryFilter} onChange={(e) => setRouteCategoryFilter(e.target.value)} className="rounded-lg border border-blue-200 px-2 py-1.5 text-xs">
+                      <option value="all">全部分类</option>
+                      {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setPickTarget("origin")} className={`rounded-lg px-2 py-2 text-xs font-bold ${pickTarget === "origin" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选起点 O</button>
-                  <button type="button" onClick={() => setPickTarget("destination")} className={`rounded-lg px-2 py-2 text-xs font-bold ${pickTarget === "destination" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选终点 D</button>
-                </div>
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
+                    <div className="mb-2 text-xs font-bold text-slate-600">坐标输入模式</div>
+                    <div className="grid grid-cols-2 gap-1 rounded-lg bg-blue-100/70 p-1">
+                      <button type="button" onClick={() => { setCoordMode("decimal"); syncModeValues("decimal"); }} className={`rounded-md px-2 py-1.5 text-xs font-bold ${coordMode === "decimal" ? "bg-white text-brand-700" : "text-slate-500"}`}>十进制度</button>
+                      <button type="button" onClick={() => { setCoordMode("dms"); syncModeValues("dms"); }} className={`rounded-md px-2 py-1.5 text-xs font-bold ${coordMode === "dms" ? "bg-white text-brand-700" : "text-slate-500"}`}>度分秒</button>
+                    </div>
+                    <div className="mt-2 text-xs font-bold text-slate-600">输入坐标系</div>
+                    <div className="mt-1 grid grid-cols-2 gap-1 rounded-lg bg-blue-100/70 p-1">
+                      <button type="button" onClick={() => switchInputCoordSystem("wgs84")} className={`rounded-md px-2 py-1.5 text-xs font-bold ${inputCoordSystem === "wgs84" ? "bg-white text-brand-700" : "text-slate-500"}`}>WGS84</button>
+                      <button type="button" onClick={() => switchInputCoordSystem("gcj02")} className={`rounded-md px-2 py-1.5 text-xs font-bold ${inputCoordSystem === "gcj02" ? "bg-white text-brand-700" : "text-slate-500"}`}>GCJ-02</button>
+                    </div>
+                    <div className="mt-1 text-[11px] font-semibold text-slate-500">内部存储与地图展示均使用 WGS84。</div>
+                  </div>
 
-                <div className="grid grid-cols-3 gap-2">
-                  <button type="button" onClick={syncInputPointsToMap} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">输入同步地图</button>
-                  <button type="button" onClick={swapEndpoints} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">交换 O/D</button>
-                  <button type="button" onClick={clearInputs} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">清空输入</button>
-                </div>
-              </div>
-            </SectionCard>
-            <SectionCard title="录入 OD 线路" open={entryOpen} onToggle={() => setEntryOpen((v) => !v)}>
-              <form onSubmit={submitRoute} className="space-y-2">
-                <EndpointEditor title="起点 O" endpoint={originInput} setEndpoint={setOriginInput} coordMode={coordMode} />
-                <EndpointEditor title="终点 D" endpoint={destinationInput} setEndpoint={setDestinationInput} coordMode={coordMode} />
-
-                <div className="grid grid-cols-2 gap-2 rounded-xl border border-blue-100 bg-white p-2">
-                  <select value={routeCategory} onChange={(e) => setRouteCategory(e.target.value)} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm">
-                    {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
-                  </select>
-                  <button disabled={submitting} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60">{submitting ? "提交中..." : "保存线路"}</button>
-                  <button type="button" onClick={generateOdMap} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700">一键生成OD图</button>
-                  <button type="button" disabled={exportingPoster} onClick={() => exportOdPoster("svg")} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700 disabled:opacity-60">导出 SVG</button>
-                  <button type="button" disabled={exportingPoster} onClick={() => exportOdPoster("png")} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出 PNG"}</button>
-                </div>
-
-                <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-2 py-2 text-[11px] font-semibold text-slate-600">
-                  十进制度示例：34.0522 / -118.2437；度分秒模式为每个坐标 3 个输入框（度、分、秒）+ 方向。
-                </div>
-              </form>
-            </SectionCard>
-
-            <SectionCard title="最近线路" open={recentOpen} onToggle={() => setRecentOpen((v) => !v)}>
-              <div className="max-h-[300px] space-y-2 overflow-auto pr-1">
-                {visibleRoutes.slice(0, 12).map((route) => (
-                  <div key={route.id} className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
-                    <div className="truncate text-sm font-bold text-slate-700">{route.origin_name} -&gt; {route.destination_name}</div>
-                    <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
-                    <div className="mt-1 flex items-center justify-end gap-2">
-                      <button type="button" onClick={() => {
-                        if (!mapRef.current) return;
-                        mapRef.current.fitBounds([[route.origin_lat, route.origin_lon], [route.destination_lat, route.destination_lon]], { padding: [42, 42] });
-                      }} className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-brand-700">定位</button>
-                      {Number(route.user_id) === Number(me?.id) && (
-                        <button type="button" onClick={() => deleteRoute(route.id)} className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600">删除</button>
-                      )}
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
+                    <div className="mb-2 text-xs font-bold text-slate-600">快捷位置（杭州师范大学）</div>
+                    <div className="space-y-2">
+                      {campusShortcuts.map((campus) => (
+                        <CampusShortcutCard
+                          key={campus.key}
+                          campus={campus}
+                          onPickOrigin={() => applyCampusShortcut(campus, "origin")}
+                          onPickDestination={() => applyCampusShortcut(campus, "destination")}
+                          onLocate={() => {
+                            if (!mapRef.current) return;
+                            mapRef.current.setView(
+                              [Number.isFinite(campus.lat_wgs84) ? campus.lat_wgs84 : campus.lat, Number.isFinite(campus.lon_wgs84) ? campus.lon_wgs84 : campus.lon],
+                              Math.max(mapRef.current.getZoom(), 14),
+                              { animate: true }
+                            );
+                          }}
+                        />
+                      ))}
                     </div>
                   </div>
-                ))}
-                {visibleRoutes.length === 0 && <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm font-semibold text-slate-500">暂无线路数据</div>}
-              </div>
-            </SectionCard>
 
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setPickTarget("origin")} className={`rounded-lg px-2 py-2 text-xs font-bold ${pickTarget === "origin" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选起点 O</button>
+                    <button type="button" onClick={() => setPickTarget("destination")} className={`rounded-lg px-2 py-2 text-xs font-bold ${pickTarget === "destination" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选终点 D</button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <button type="button" onClick={syncInputPointsToMap} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">输入同步地图</button>
+                    <button type="button" onClick={swapEndpoints} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">交换 O/D</button>
+                    <button type="button" onClick={clearInputs} className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-brand-700">清空输入</button>
+                  </div>
+                </div>
+              </SectionCard>
+              <SectionCard title="录入 OD 线路" open={entryOpen} onToggle={() => setEntryOpen((v) => !v)}>
+                <form onSubmit={submitRoute} className="space-y-2">
+                  <EndpointEditor title="起点 O" endpoint={originInput} setEndpoint={setOriginInput} coordMode={coordMode} />
+                  <EndpointEditor title="终点 D" endpoint={destinationInput} setEndpoint={setDestinationInput} coordMode={coordMode} />
+
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-blue-100 bg-white p-2">
+                    <select value={routeCategory} onChange={(e) => setRouteCategory(e.target.value)} className="rounded-lg border border-blue-200 px-2 py-1.5 text-sm">
+                      {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                    </select>
+                    <button disabled={submitting} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60">{submitting ? "提交中..." : "保存线路"}</button>
+                    <button type="button" onClick={generateOdMap} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700">生成 OD 图</button>
+                    <button type="button" disabled={exportingPoster} onClick={() => exportOdPoster("svg")} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700 disabled:opacity-60">导出 SVG</button>
+                    <button type="button" disabled={exportingPoster} onClick={() => exportOdPoster("png")} className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出 PNG"}</button>
+                  </div>
+
+                  <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-2 py-2 text-[11px] font-semibold text-slate-600">
+                    支持 WGS84 与 GCJ-02 输入；内部存储与展示默认采用 WGS84。
+                  </div>
+                </form>
+              </SectionCard>
+
+              <SectionCard title="最近线路" open={recentOpen} onToggle={() => setRecentOpen((v) => !v)}>
+                <div className="max-h-[280px] space-y-2 overflow-auto pr-1 lg:max-h-[34vh]">
+                  {visibleRoutes.slice(0, isCompactScreen ? 8 : 16).map((route) => (
+                    <div key={route.id} className="rounded-xl border border-blue-100 bg-blue-50/40 p-2">
+                      <div className="truncate text-sm font-bold text-slate-700">{route.origin_name} -&gt; {route.destination_name}</div>
+                      <div className="text-xs font-semibold text-slate-500">{route.category} | {api.fmtTime(route.created_at)}</div>
+                      <div className="mt-1 flex items-center justify-end gap-2">
+                        <button type="button" onClick={() => {
+                          if (!mapRef.current) return;
+                          mapRef.current.fitBounds([[route.origin_lat, route.origin_lon], [route.destination_lat, route.destination_lon]], { padding: [42, 42] });
+                        }} className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-brand-700">定位</button>
+                        {Number(route.user_id) === Number(me?.id) && (
+                          <button type="button" onClick={() => deleteRoute(route.id)} className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600">删除</button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {visibleRoutes.length === 0 && <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm font-semibold text-slate-500">暂无线路数据</div>}
+                </div>
+              </SectionCard>
+            </div>
           </aside>
         )}
       </main>
 
       {!mapFullscreen && (
-        <footer className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <StatCard title="我的线路数" value={api.fmtNumber(mySummary.count)} hint="当前账号累计" />
+        <footer className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <StatCard title="我的线路数" value={api.fmtNumber(mySummary.count)} hint="当前用户累计" />
           <StatCard title="当前显示线路" value={api.fmtNumber(visibleRoutes.length)} hint={showOnlyMine ? "仅我的数据" : "全体数据"} />
           <StatCard title="点选状态" value={pickTarget ? `等待设置${pickTarget === "origin" ? "起点" : "终点"}` : "未开启"} hint={coordMode === "dms" ? "当前为度分秒输入" : "当前为十进制度输入"} />
         </footer>
@@ -852,7 +1089,7 @@ function ExplorerApp() {
 
 const explorerRootNode = document.getElementById("app");
 if (ReactDOM.createRoot) {
-    ReactDOM.createRoot(explorerRootNode).render(<ExplorerApp />);
+  ReactDOM.createRoot(explorerRootNode).render(<ExplorerApp />);
 } else {
-    ReactDOM.render(<ExplorerApp />, explorerRootNode);
+  ReactDOM.render(<ExplorerApp />, explorerRootNode);
 }

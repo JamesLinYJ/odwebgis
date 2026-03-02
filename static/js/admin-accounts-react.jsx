@@ -28,7 +28,6 @@ function PasswordStrengthBar({ password, username = "" }) {
 function AdminAccountsApp() {
     const [loading, setLoading] = useState(true);
     const [accounts, setAccounts] = useState([]);
-
     const [filter, setFilter] = useState({ q: "", user_type: "all" });
     const [form, setForm] = useState({
         name: "",
@@ -38,7 +37,6 @@ function AdminAccountsApp() {
     });
     const [formSubmitting, setFormSubmitting] = useState(false);
     const [deleteBusyId, setDeleteBusyId] = useState(null);
-
     const [resetModal, setResetModal] = useState({
         open: false,
         account: null,
@@ -141,9 +139,7 @@ function AdminAccountsApp() {
 
     async function removeAccount(acc) {
         const target = `${acc.name}（${acc.username || "-"}）`;
-        if (!window.confirm(`确认删除账户 ${target}？此操作会删除该账户的所有线路数据。`)) {
-            return;
-        }
+        if (!window.confirm(`确认删除账户 ${target}？此操作会删除该账户的全部路线。`)) return;
         setDeleteBusyId(acc.id);
         try {
             await api.del(`/api/admin/accounts/${acc.id}`);
@@ -180,7 +176,7 @@ function AdminAccountsApp() {
         e.preventDefault();
         if (!resetModal.account) return;
         if (resetModal.password !== resetModal.confirm) {
-            api.notify("两次新密码不一致", true);
+            api.notify("两次新密码输入不一致", true);
             return;
         }
         const username = resetModal.account.username || "";
@@ -219,7 +215,7 @@ function AdminAccountsApp() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <div className="text-2xl font-black text-admin-600">账户管理</div>
-                        <div className="text-xs font-semibold text-slate-500">独立页面管理所有账户</div>
+                        <div className="text-xs font-semibold text-slate-500">管理全部账户</div>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
@@ -227,7 +223,7 @@ function AdminAccountsApp() {
                             onClick={() => (window.location.href = "/admin")}
                             className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-admin-600"
                         >
-                            返回管理后台
+                            返回教师后台
                         </button>
                         <button
                             type="button"
@@ -254,13 +250,13 @@ function AdminAccountsApp() {
                         <input
                             required
                             value={form.name}
-                            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                            onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                             className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
                             placeholder="姓名"
                         />
                         <select
                             value={form.user_type}
-                            onChange={(e) => setForm((p) => ({ ...p, user_type: e.target.value }))}
+                            onChange={(e) => setForm((prev) => ({ ...prev, user_type: e.target.value }))}
                             className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
                         >
                             <option value="student">普通账户（学生）</option>
@@ -269,7 +265,7 @@ function AdminAccountsApp() {
                         <input
                             required
                             value={form.username}
-                            onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+                            onChange={(e) => setForm((prev) => ({ ...prev, username: e.target.value }))}
                             className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
                             placeholder="用户名"
                         />
@@ -277,7 +273,7 @@ function AdminAccountsApp() {
                             required
                             type="password"
                             value={form.password}
-                            onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+                            onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
                             className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
                             placeholder="8-64 位，支持特殊符号"
                         />
@@ -304,13 +300,13 @@ function AdminAccountsApp() {
                     <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                         <input
                             value={filter.q}
-                            onChange={(e) => setFilter((p) => ({ ...p, q: e.target.value }))}
+                            onChange={(e) => setFilter((prev) => ({ ...prev, q: e.target.value }))}
                             className="sm:col-span-2 rounded-lg border border-blue-200 px-3 py-2 text-sm"
                             placeholder="搜索姓名 / 用户名 / 状态"
                         />
                         <select
                             value={filter.user_type}
-                            onChange={(e) => setFilter((p) => ({ ...p, user_type: e.target.value }))}
+                            onChange={(e) => setFilter((prev) => ({ ...prev, user_type: e.target.value }))}
                             className="rounded-lg border border-blue-200 px-3 py-2 text-sm"
                         >
                             <option value="all">角色：全部</option>
@@ -329,7 +325,7 @@ function AdminAccountsApp() {
                                             用户名：{acc.username || "-"} | {acc.user_type === "admin" ? "管理员" : "学生"}
                                         </div>
                                         <div className="truncate text-xs font-semibold text-slate-500">
-                                            状态：{acc.status} | 线路：{api.fmtNumber(acc.route_count)} 条
+                                            状态：{acc.status} | 路线：{api.fmtNumber(acc.route_count)} 条
                                         </div>
                                     </div>
                                     <div className="text-right text-[11px] font-bold text-slate-400">ID {acc.id}</div>
@@ -364,7 +360,10 @@ function AdminAccountsApp() {
 
             {resetModal.open && (
                 <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-slate-900/30 p-3 backdrop-blur-[2px]">
-                    <form onSubmit={submitResetPassword} className="ios-card w-[min(92vw,420px)] rounded-2xl border border-blue-100 bg-white p-4 shadow-soft">
+                    <form
+                        onSubmit={submitResetPassword}
+                        className="ios-card w-[min(92vw,420px)] rounded-2xl border border-blue-100 bg-white p-4 shadow-soft"
+                    >
                         <div className="mb-2 text-lg font-black text-admin-600">重置密码</div>
                         <div className="mb-3 text-xs font-semibold text-slate-500">
                             目标账户：{resetModal.account?.name}（{resetModal.account?.username || "-"}）

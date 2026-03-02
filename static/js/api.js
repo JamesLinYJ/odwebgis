@@ -235,8 +235,8 @@
 
     function fmtTime(value) {
         if (!value) return "-";
-        const d = new Date(value.replace(" ", "T") + "Z");
-        if (Number.isNaN(d.getTime())) return value;
+        const d = new Date(String(value).replace(" ", "T") + "Z");
+        if (Number.isNaN(d.getTime())) return String(value);
         return d.toLocaleString("zh-CN", { hour12: false });
     }
 
@@ -255,19 +255,24 @@
             toast.style.borderRadius = "12px";
             toast.style.fontWeight = "700";
             toast.style.color = "#fff";
-            toast.style.boxShadow = "0 10px 22px rgba(0,0,0,0.2)";
+            toast.style.boxShadow = "0 16px 30px rgba(15,23,42,0.18)";
+            toast.style.backdropFilter = "blur(10px)";
+            toast.style.transition = "opacity .25s ease, transform .25s ease";
+            toast.style.transform = "translateY(6px)";
             document.body.appendChild(toast);
         }
 
         toast.style.background = isError
-            ? "linear-gradient(90deg,#d94841,#ef4444)"
-            : "linear-gradient(90deg,#1f6cff,#15b8f9)";
+            ? "linear-gradient(135deg, #dc2626, #ef4444)"
+            : "linear-gradient(135deg, #2563eb, #0ea5e9)";
         toast.textContent = message;
         toast.style.opacity = "1";
+        toast.style.transform = "translateY(0)";
 
         clearTimeout(toast.__timer);
         toast.__timer = setTimeout(() => {
             toast.style.opacity = "0";
+            toast.style.transform = "translateY(6px)";
         }, 2200);
     }
 
@@ -284,4 +289,3 @@
         notify,
     };
 })();
-

@@ -58,13 +58,14 @@ function AccountApp() {
     async function submitPassword(e) {
         e.preventDefault();
         if (!form.old_password || !form.new_password || !form.confirm_password) {
-            api.notify("请完整填写密码", true);
+            api.notify("请完整填写密码信息", true);
             return;
         }
         if (form.new_password !== form.confirm_password) {
-            api.notify("两次新密码不一致", true);
+            api.notify("两次新密码输入不一致", true);
             return;
         }
+
         const passwordErr = api.validatePasswordInput(form.new_password, user?.username || "");
         if (passwordErr) {
             api.notify(passwordErr, true);
@@ -110,21 +111,21 @@ function AccountApp() {
             <header className="ios-card mb-3 rounded-2xl border border-blue-100 bg-white/95 px-4 py-3 shadow-soft">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                        <div className="text-2xl font-black text-blue-700">账户中心</div>
-                        <div className="text-xs font-semibold text-slate-500">单独页面</div>
+                        <div className="text-2xl font-black text-brand-700">账户中心</div>
+                        <div className="text-xs font-semibold text-slate-500">账户信息与安全设置</div>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
                             type="button"
                             onClick={backToMain}
-                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-blue-700"
+                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700"
                         >
-                            返回主界面
+                            返回主页面
                         </button>
                         <button
                             type="button"
                             onClick={logout}
-                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-blue-700"
+                            className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-bold text-brand-700"
                         >
                             退出登录
                         </button>
@@ -137,9 +138,13 @@ function AccountApp() {
                 {!loading && user && (
                     <div className="space-y-4">
                         <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
-                            <div className="text-sm font-black text-blue-700">{user.name}</div>
-                            <div className="mt-1 text-xs font-semibold text-slate-600">用户名：{user.username || "-"}</div>
-                            <div className="mt-1 text-xs font-semibold text-slate-600">角色：{user.user_type === "admin" ? "管理员" : "学生"}</div>
+                            <div className="text-sm font-black text-brand-700">{user.name}</div>
+                            <div className="mt-1 text-xs font-semibold text-slate-600">
+                                用户名：{user.username || "-"}
+                            </div>
+                            <div className="mt-1 text-xs font-semibold text-slate-600">
+                                角色：{user.user_type === "admin" ? "管理员" : "学生"}
+                            </div>
                             {user.must_change_password && (
                                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">
                                     当前账户需要先修改密码
@@ -154,12 +159,12 @@ function AccountApp() {
 
                         {!user.is_system_admin && (
                             <form onSubmit={submitPassword} className="space-y-2 rounded-xl border border-blue-100 bg-white p-3">
-                                <div className="text-sm font-black text-blue-700">修改密码</div>
+                                <div className="text-sm font-black text-brand-700">修改密码</div>
                                 <input
                                     required
                                     type="password"
                                     value={form.old_password}
-                                    onChange={(e) => setForm((p) => ({ ...p, old_password: e.target.value }))}
+                                    onChange={(e) => setForm((prev) => ({ ...prev, old_password: e.target.value }))}
                                     className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
                                     placeholder="旧密码"
                                 />
@@ -167,7 +172,7 @@ function AccountApp() {
                                     required
                                     type="password"
                                     value={form.new_password}
-                                    onChange={(e) => setForm((p) => ({ ...p, new_password: e.target.value }))}
+                                    onChange={(e) => setForm((prev) => ({ ...prev, new_password: e.target.value }))}
                                     className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
                                     placeholder="8-64 位，支持特殊符号"
                                 />
@@ -175,14 +180,14 @@ function AccountApp() {
                                     required
                                     type="password"
                                     value={form.confirm_password}
-                                    onChange={(e) => setForm((p) => ({ ...p, confirm_password: e.target.value }))}
+                                    onChange={(e) => setForm((prev) => ({ ...prev, confirm_password: e.target.value }))}
                                     className="w-full rounded-lg border border-blue-200 px-3 py-2 text-sm"
                                     placeholder="确认新密码"
                                 />
                                 <PasswordStrengthBar password={form.new_password} username={user.username || ""} />
                                 <button
                                     disabled={saving}
-                                    className="w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60"
+                                    className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-bold text-white disabled:opacity-60"
                                 >
                                     {saving ? "提交中..." : "确认修改密码"}
                                 </button>
