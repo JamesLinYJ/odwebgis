@@ -275,7 +275,7 @@ function AuthApp() {
                                     />
                                 </div>
                                 <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2 text-xs font-semibold text-slate-600">
-                                    访客可直接进入学生页面并录入线路，数据将以访客身份保存。
+                                    访客可直接进入地图页面并录入线路，数据将以访客身份保存。
                                 </div>
                                 <button
                                     disabled={loading}

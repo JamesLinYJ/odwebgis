@@ -166,7 +166,7 @@ function AccountApp() {
                                 </div>
                             )}
                             <div className="mt-1 text-xs font-semibold text-slate-600">
-                                角色：{user.is_guest ? "访客" : user.user_type === "admin" ? "管理员" : "学生"}
+                                角色：{user.is_guest ? "访客" : user.user_type === "admin" ? "管理员" : "普通账户"}
                             </div>
                             {user.must_change_password && (
                                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">

@@ -1558,7 +1558,7 @@ def create_app() -> Flask:
                     r["name"],
                     r["username"] or "",
                     user_status_label(r["status"]),
-                    "管理员" if r["user_type"] == "admin" else "学生",
+                    "管理员" if r["user_type"] == "admin" else "普通账户",
                     r["route_count"],
                     r["last_active_at"],
                 ]
@@ -1895,7 +1895,7 @@ def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     result["status_code"] = status_code
     result["status"] = user_status_label(status_code)
     result["username"] = result.get("username") or ""
-    result["role"] = "管理员" if result.get("user_type") == "admin" else "学生"
+    result["role"] = "管理员" if result.get("user_type") == "admin" else "普通账户"
     result["must_change_password"] = bool(int(result.get("force_password_change") or 0))
     result["route_count"] = int(result.get("route_count", 0))
     result["is_system_admin"] = False

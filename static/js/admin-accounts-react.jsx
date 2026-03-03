@@ -229,15 +229,21 @@ function AdminAccountsApp() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <div className="text-2xl font-black text-admin-600">账户管理</div>
-                        <div className="text-xs font-semibold text-slate-500">管理学生与管理员账户</div>
+                        <div className="text-xs font-semibold text-slate-500">管理普通与管理员账户</div>
                     </div>
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+                        <a
+                            href="/api/export/accounts-csv"
+                            className="rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50"
+                        >
+                            导出账户列表 CSV
+                        </a>
                         <button
                             type="button"
                             onClick={() => (window.location.href = "/admin")}
                             className="rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50"
                         >
-                            返回教师后台
+                            返回管理后台
                         </button>
                         <button
                             type="button"
@@ -280,7 +286,7 @@ function AdminAccountsApp() {
                             onChange={(e) => setForm((prev) => ({ ...prev, user_type: e.target.value }))}
                             className="modern-input rounded-xl px-4 py-3 text-sm"
                         >
-                            <option value="student">普通账户（学生）</option>
+                            <option value="student">普通账户</option>
                             <option value="admin">管理员账户</option>
                         </select>
                         <input
@@ -331,7 +337,7 @@ function AdminAccountsApp() {
                             className="modern-input rounded-xl px-4 py-2.5 text-sm"
                         >
                             <option value="all">角色：全部</option>
-                            <option value="student">学生</option>
+                            <option value="student">普通账户</option>
                             <option value="admin">管理员</option>
                         </select>
                     </div>
@@ -343,7 +349,7 @@ function AdminAccountsApp() {
                                     <div className="min-w-0">
                                         <div className="truncate text-base font-bold text-slate-800">{acc.name}</div>
                                         <div className="mt-1 truncate text-xs font-semibold text-slate-500">
-                                            用户名：{acc.username || "-"} | {acc.user_type === "admin" ? "管理员" : "学生"}
+                                            用户名：{acc.username || "-"} | {acc.user_type === "admin" ? "管理员" : "普通账户"}
                                         </div>
                                         <div className="truncate text-xs font-semibold text-slate-500">
                                             状态：{acc.status} | 路线：{api.fmtNumber(acc.route_count)} 条

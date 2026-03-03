@@ -718,7 +718,7 @@ function ExplorerApp() {
         `<div style="min-width:190px">` +
         `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
         `分类：${route.category}<br/>` +
-        `录入学生：${route.user_name || "-"}<br/>` +
+        `录入账号：${route.user_name || "-"}<br/>` +
         `时间：${api.fmtTime(route.created_at)}` +
         `</div>`
       );

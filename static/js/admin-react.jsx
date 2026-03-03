@@ -50,6 +50,45 @@ function buildCurve(start, end, segments = 40) {
     return points;
 }
 
+function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function formatKm(km) {
+    if (!Number.isFinite(km)) return "";
+    if (km >= 1) return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+    return `${Math.round(km * 1000)} m`;
+}
+
+function curveMidpoint(start, end, t = 0.5) {
+    const [lat1, lon1] = start;
+    const [lat2Raw, lon2Raw] = end;
+    let lat2 = Number(lat2Raw), lon2 = Number(lon2Raw);
+    let dxLon = lon2 - lon1;
+    if (dxLon > 180) { lon2 -= 360; dxLon = lon2 - lon1; }
+    else if (dxLon < -180) { lon2 += 360; dxLon = lon2 - lon1; }
+    const dyLat = lat2 - lat1;
+    const dist = Math.sqrt(dxLon * dxLon + dyLat * dyLat);
+    if (dist < 1e-4) return { lat: lat1, lon: lon1, angle: 0 };
+    const midLat = (lat1 + lat2) / 2;
+    const midLon = (lon1 + lon2) / 2;
+    const ratio = dist < 0.08 ? 0.04 : dist < 0.35 ? 0.08 : dist < 1.2 ? 0.12 : 0.16;
+    const offset = Math.min(6, dist * ratio);
+    const ctrlLat = midLat + (dxLon / dist) * offset;
+    const ctrlLon = midLon - (dyLat / dist) * offset;
+    const omt = 1 - t;
+    const lat = omt * omt * lat1 + 2 * omt * t * ctrlLat + t * t * lat2;
+    const lon = omt * omt * lon1 + 2 * omt * t * ctrlLon + t * t * lon2;
+    const dx = 2 * omt * (ctrlLon - lon1) + 2 * t * (lon2 - ctrlLon);
+    const dy = 2 * omt * (ctrlLat - lat1) + 2 * t * (lat2 - ctrlLat);
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    return { lat, lon: lon > 180 ? lon - 360 : lon < -180 ? lon + 360 : lon, angle };
+}
+
 function MetricCard({ title, value, hint }) {
     return (
         <div className="rounded-xl border border-blue-100 bg-white px-3 py-2 shadow-soft">
@@ -63,6 +102,30 @@ function MetricCard({ title, value, hint }) {
 function routeBrief(route) {
     return `${route.origin_name} -> ${route.destination_name}`;
 }
+
+const EXPORT_QUALITY_PRESETS = {
+    standard: {
+        width: 1600,
+        height: 900,
+        scale: 2,
+        mapScale: 1.85,
+        qualityScale: 1.4,
+    },
+    high: {
+        width: 1920,
+        height: 1080,
+        scale: 2.6,
+        mapScale: 2.2,
+        qualityScale: 1.8,
+    },
+    ultra: {
+        width: 2560,
+        height: 1440,
+        scale: 3.2,
+        mapScale: 2.55,
+        qualityScale: 2,
+    },
+};
 
 function attachMapDecorControls(map) {
     if (!map || !window.L) return;
@@ -94,7 +157,7 @@ function attachMapDecorControls(map) {
     /* ─── Auto-updating scale bar ─── */
     const scaleText = decorControl.getContainer().querySelector(".scale-text");
     const scaleLine = decorControl.getContainer().querySelector(".scale-line");
-    
+
     function pickNiceScaleDistance(maxMeters) {
         if (!Number.isFinite(maxMeters) || maxMeters <= 0) return 1;
         const target = maxMeters * 0.72;
@@ -153,10 +216,26 @@ function AdminApp() {
     const [selectedRouteIds, setSelectedRouteIds] = useState([]);
     const [routeCategory, setRouteCategory] = useState("all");
     const [routeKeyword, setRouteKeyword] = useState("");
-    const [lineLabelMode, setLineLabelMode] = useState("simple");
+    const [lineLabelMode, setLineLabelMode] = useState("name");
     const [baseMapMode, setBaseMapMode] = useState("vector");
     const [mapFullscreen, setMapFullscreen] = useState(false);
     const [exportingPoster, setExportingPoster] = useState(false);
+    const [exportPanelOpen, setExportPanelOpen] = useState(false);
+    const [exportOptions, setExportOptions] = useState({
+        title: "OD 全量/筛选线路导出图",
+        subtitle: "",
+        quality: "high",
+        colorMode: "category",
+        lineStyle: "flow",
+        labelMode: "name",
+        labelLimit: 180,
+        showLegend: true,
+        mapOverlay: true,
+        randomSeed: "",
+        filePrefix: "od_admin",
+        endpointLabelMode: "both",
+        showDistance: false,
+    });
     const [isCompactScreen, setIsCompactScreen] = useState(false);
     const [themeMode, setThemeMode] = useState(api.getTheme(api.getThemePreference()));
     const [filterPanelOpen, setFilterPanelOpen] = useState(true);
@@ -409,7 +488,7 @@ function AdminApp() {
 
     useEffect(() => {
         const timer = setTimeout(() => {
-            loadUsers().catch((err) => api.notify(err.message || "加载学生失败", true));
+            loadUsers().catch((err) => api.notify(err.message || "加载用户失败", true));
         }, 250);
         return () => clearTimeout(timer);
     }, [filters]);
@@ -429,7 +508,7 @@ function AdminApp() {
             setCategories([]);
             return;
         }
-        loadSelectedSummary(selectedUserId).catch((err) => api.notify(err.message || "加载学生摘要失败", true));
+        loadSelectedSummary(selectedUserId).catch((err) => api.notify(err.message || "加载用户摘要失败", true));
     }, [selectedUserId]);
 
     // Keep route checkbox selections aligned with the currently selected student.
@@ -471,15 +550,40 @@ function AdminApp() {
                 border: 1px solid #cfe2ff;
                 background: rgba(255, 255, 255, 0.92);
                 color: #1e3a8a;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 700;
                 border-radius: 8px;
-                padding: 2px 6px;
+                padding: 2px 7px;
                 box-shadow: 0 4px 12px rgba(37, 99, 235, 0.16);
+                white-space: nowrap;
+                max-width: 260px;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
-            .leaflet-tooltip.od-line-label:before {
-                display: none;
+            .leaflet-tooltip.od-line-label:before { display: none; }
+            .leaflet-tooltip.od-point-label {
+                border: 1px solid #dbeafe;
+                background: rgba(255, 255, 255, 0.88);
+                color: #334155;
+                font-size: 10px;
+                font-weight: 600;
+                border-radius: 6px;
+                padding: 1px 5px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                white-space: nowrap;
             }
+            .leaflet-tooltip.od-point-label:before { display: none; }
+            .leaflet-tooltip.od-distance-label {
+                border: 1px solid #e0e7ff;
+                background: rgba(238, 242, 255, 0.94);
+                color: #3730a3;
+                font-size: 10px;
+                font-weight: 800;
+                border-radius: 10px;
+                padding: 1px 6px;
+                box-shadow: 0 2px 6px rgba(99, 102, 241, 0.18);
+            }
+            .leaflet-tooltip.od-distance-label:before { display: none; }
         `;
         document.head.appendChild(style);
     }, []);
@@ -553,13 +657,15 @@ function AdminApp() {
         if (!routeLayerRef.current) return;
         routeLayerRef.current.clearLayers();
 
-        const effectiveLabelMode = activeRoutes.length > 250 && lineLabelMode === "detail" ? "simple" : lineLabelMode;
-        const hasExplicitLabelSelection = explicitSelectedUserIdSet.size > 0 || selectedRouteIdSet.size > 0;
+        const mode = lineLabelMode;
+        const hasExplicitSelection = explicitSelectedUserIdSet.size > 0 || selectedRouteIdSet.size > 0;
+        // Throttle detailed labels when too many routes
+        const effectiveMode = activeRoutes.length > 300 && (mode === "full" || mode === "od") ? "name" : mode;
 
         activeRoutes.forEach((route) => {
             const uid = Number(route.user_id);
             const userInfo = userMap.get(uid);
-            const studentName = userInfo?.name || route.user_name || "未知学生";
+            const studentName = userInfo?.name || route.user_name || "未知用户";
             const username = userInfo?.username || "";
 
             const isFocusUser = selectedUserId && uid === Number(selectedUserId);
@@ -573,7 +679,9 @@ function AdminApp() {
             const from = [route.origin_lat, route.origin_lon];
             const to = [route.destination_lat, route.destination_lon];
             const curve = buildCurve(from, to);
+            const distKm = haversineKm(from[0], from[1], to[0], to[1]);
 
+            // — Arc line —
             const line = L.polyline(curve, {
                 color,
                 weight,
@@ -581,34 +689,81 @@ function AdminApp() {
                 dashArray: emphasize ? "9 6" : isMultiSelectedUser ? "8 7" : "7 8",
             }).addTo(routeLayerRef.current);
 
-            const shouldShowNameLabel = hasExplicitLabelSelection && (isRouteSelected || explicitSelectedUserIdSet.has(uid));
-            if (effectiveLabelMode !== "none" && shouldShowNameLabel) {
-                const labelText = effectiveLabelMode === "detail"
-                    ? `${studentName} | ${route.category}`
-                    : `${studentName}`;
-                line.bindTooltip(labelText, {
-                    permanent: true,
-                    direction: "center",
-                    className: "od-line-label",
+            // — Direction arrow at 90% of curve —
+            if (emphasize || isMultiSelectedUser) {
+                const arrow = curveMidpoint(from, to, 0.90);
+                const arrowSize = emphasize ? 9 : 7;
+                const arrowIcon = L.divIcon({
+                    className: "",
+                    html: `<svg width="${arrowSize * 2}" height="${arrowSize * 2}" viewBox="0 0 20 20" style="transform:rotate(${arrow.angle - 90}deg)"><polygon points="10,2 17,16 10,12 3,16" fill="${color}" opacity="0.85"/></svg>`,
+                    iconSize: [arrowSize * 2, arrowSize * 2],
+                    iconAnchor: [arrowSize, arrowSize],
                 });
+                L.marker([arrow.lat, arrow.lon], { icon: arrowIcon, interactive: false }).addTo(routeLayerRef.current);
             }
 
+            // — Line label (mid-arc) —
+            const shouldLabel = hasExplicitSelection && (isRouteSelected || explicitSelectedUserIdSet.has(uid));
+            if (effectiveMode !== "none" && shouldLabel) {
+                let labelText = "";
+                if (effectiveMode === "name") labelText = studentName;
+                else if (effectiveMode === "od") labelText = `${route.origin_name} → ${route.destination_name}`;
+                else if (effectiveMode === "full") labelText = `${studentName} | ${route.origin_name} → ${route.destination_name} | ${route.category}`;
+                else if (effectiveMode === "distance") labelText = formatKm(distKm);
+
+                if (labelText) {
+                    line.bindTooltip(labelText, {
+                        permanent: true,
+                        direction: "center",
+                        className: effectiveMode === "distance" ? "od-distance-label" : "od-line-label",
+                    });
+                }
+            }
+
+            // — Popup with distance —
             line.bindPopup(
                 `<div style="min-width:220px">` +
-                `<strong>${route.origin_name} -> ${route.destination_name}</strong><br/>` +
+                `<strong>${route.origin_name} → ${route.destination_name}</strong><br/>` +
                 `录入用户：${studentName}${username ? ` (${username})` : ""}<br/>` +
                 `分类：${route.category}<br/>` +
+                `直线距离：${formatKm(distKm)}<br/>` +
                 `时间：${api.fmtTime(route.created_at)}` +
                 `</div>`
             );
 
+            // — Origin marker (hollow diamond) —
+            L.circleMarker(from, {
+                radius: emphasize ? 3.5 : isMultiSelectedUser ? 3 : 2.5,
+                color,
+                fillColor: "#ffffff",
+                fillOpacity: 0.8,
+                weight: emphasize ? 2 : 1.5,
+            }).addTo(routeLayerRef.current);
+
+            // — Destination marker (filled with white stroke) —
             L.circleMarker(to, {
                 radius: emphasize ? 4.6 : isMultiSelectedUser ? 4 : 3.6,
-                color,
+                color: "#ffffff",
                 fillColor: color,
                 fillOpacity: emphasize ? 0.95 : isMultiSelectedUser ? 0.85 : 0.75,
-                weight: 0,
+                weight: emphasize ? 1.8 : 1.2,
             }).addTo(routeLayerRef.current);
+
+            // — Endpoint place-name labels (only for selected routes, od/full modes) —
+            if (shouldLabel && (effectiveMode === "od" || effectiveMode === "full")) {
+                if (route.origin_name) {
+                    L.tooltip({ permanent: true, direction: "left", className: "od-point-label", offset: [-6, 0] })
+                        .setContent(route.origin_name)
+                        .setLatLng(from)
+                        .addTo(routeLayerRef.current);
+                }
+                if (route.destination_name) {
+                    L.tooltip({ permanent: true, direction: "right", className: "od-point-label", offset: [6, 0] })
+                        .setContent(route.destination_name)
+                        .setLatLng(to)
+                        .addTo(routeLayerRef.current);
+                }
+            }
         });
     }, [activeRoutes, selectedUserId, selectedUserIdSet, selectedRouteIdSet, explicitSelectedUserIdSet, lineLabelMode, userMap]);
 
@@ -642,7 +797,7 @@ function AdminApp() {
         setSelectedRouteIds([]);
         const rows = allRoutes.filter((r) => Number(r.user_id) === Number(userId));
         if (rows.length === 0) {
-            api.notify("该学生暂无线路数据", true);
+            api.notify("该用户暂无线路数据", true);
             return;
         }
         zoomToRoutes(rows);
@@ -686,7 +841,7 @@ function AdminApp() {
 
     function showSelectedStudentRoutes() {
         if (selectedUserIds.length === 0) {
-            api.notify("请先在左侧选择至少一个学生", true);
+            api.notify("请先在左侧选择至少一个用户", true);
             return;
         }
         setOnlySelectedStudent(true);
@@ -703,23 +858,29 @@ function AdminApp() {
 
     function handleStudentClick(e, user) {
         const id = Number(user.id);
-        if (e.ctrlKey || e.metaKey) {
-            setSelectedUserIds((prev) => {
-                const exists = (prev || []).some((v) => Number(v) === id);
-                if (exists) {
-                    const next = (prev || []).filter((v) => Number(v) !== id);
-                    if (Number(selectedUserId) === id) {
-                        setSelectedUserId(next.length > 0 ? Number(next[0]) : null);
-                    }
-                    return next;
+        setSelectedUserIds((prev) => {
+            const exists = (prev || []).some((v) => Number(v) === id);
+            if (exists) {
+                const next = (prev || []).filter((v) => Number(v) !== id);
+                if (Number(selectedUserId) === id) {
+                    setSelectedUserId(next.length > 0 ? Number(next[0]) : null);
                 }
-                setSelectedUserId(id);
-                return [...(prev || []), id];
-            });
-            return;
-        }
-        setSelectedUserId(id);
-        setSelectedUserIds([id]);
+                return next;
+            }
+            setSelectedUserId(id);
+            return [...(prev || []), id];
+        });
+    }
+
+    function selectAllUsers() {
+        const ids = users.map((u) => Number(u.id));
+        setSelectedUserIds(ids);
+        if (ids.length > 0) setSelectedUserId(ids[0]);
+    }
+
+    function deselectAllUsers() {
+        setSelectedUserIds([]);
+        setSelectedUserId(null);
         setSelectedRouteIds([]);
     }
 
@@ -887,7 +1048,32 @@ function AdminApp() {
         setMapFullscreen((v) => !v);
     }
 
-    async function exportOdPoster(format = "png") {
+    function updateExportOption(field, value) {
+        setExportOptions((prev) => ({
+            ...prev,
+            [field]: value,
+        }));
+    }
+
+    function resetExportOptions() {
+        setExportOptions({
+            title: "OD 全量/筛选线路导出图",
+            subtitle: "",
+            quality: "high",
+            colorMode: "category",
+            lineStyle: "flow",
+            labelMode: "name",
+            labelLimit: 180,
+            showLegend: true,
+            mapOverlay: true,
+            randomSeed: "",
+            filePrefix: "od_admin",
+            endpointLabelMode: "both",
+            showDistance: false,
+        });
+    }
+
+    async function exportOdPoster() {
         if (!window.odExport || typeof window.odExport.downloadPoster !== "function") {
             api.notify("导出模块未加载", true);
             return;
@@ -898,16 +1084,23 @@ function AdminApp() {
         }
         setExportingPoster(true);
         try {
+            const format = "png";
             const who = me?.name || me?.username || "";
             const subtitle = onlySelectedStudent
-                ? `教师端筛选导出（${selectedUserIds.length}名学生）`
-                : "教师端筛选导出（全体可见）";
+                ? `筛选导出（${selectedUserIds.length}个用户）`
+                : "筛选导出（全部可见）";
+            const qualityPreset = EXPORT_QUALITY_PRESETS[exportOptions.quality] || EXPORT_QUALITY_PRESETS.high;
+            const labelLimit = Math.max(0, Math.min(1200, Number(exportOptions.labelLimit) || 0));
+            const safePrefix = String(exportOptions.filePrefix || "od_admin")
+                .trim()
+                .replace(/[^\w-]+/g, "_")
+                .replace(/^_+|_+$/g, "") || "od_admin";
             await window.odExport.downloadPoster(activeRoutes, {
                 format,
-                title: "OD 全量/筛选线路导出图",
-                subtitle,
+                title: String(exportOptions.title || "").trim() || "OD 全量/筛选线路导出图",
+                subtitle: String(exportOptions.subtitle || "").trim() || subtitle,
                 owner: who,
-                filename: `od_admin_${new Date().toISOString().slice(0, 10)}`,
+                filename: `${safePrefix}_${new Date().toISOString().slice(0, 10)}`,
                 categoryColors: {
                     课堂: "#2563eb",
                     通勤: "#0891b2",
@@ -915,16 +1108,23 @@ function AdminApp() {
                     实习: "#f97316",
                     其他: "#4b5563",
                 },
-                width: 1920,
-                height: 1080,
-                scale: 2,
-                map: format === "png" ? mapRef.current : null,
+                width: qualityPreset.width,
+                height: qualityPreset.height,
+                scale: qualityPreset.scale,
+                map: format === "png" && exportOptions.mapOverlay ? mapRef.current : null,
                 baseMapMode,
-                mapScale: 2.2,
-                qualityScale: 1.8,
-                labelLimit: 160,
+                mapScale: qualityPreset.mapScale,
+                qualityScale: qualityPreset.qualityScale,
+                colorMode: exportOptions.colorMode,
+                lineStyle: exportOptions.lineStyle,
+                labelMode: exportOptions.labelMode,
+                labelLimit,
+                showLegend: !!exportOptions.showLegend,
+                randomSeed: String(exportOptions.randomSeed || "").trim(),
+                endpointLabelMode: exportOptions.endpointLabelMode || "none",
+                showDistance: !!exportOptions.showDistance,
             });
-            api.notify(format === "svg" ? "OD 图 SVG 已导出" : "OD 图 PNG 已导出");
+            api.notify("OD 图 PNG 已导出");
         } catch (err) {
             api.notify(err.message || "导出失败", true);
         } finally {
@@ -1059,7 +1259,7 @@ function AdminApp() {
         const targetRoutes = allRoutes.filter((r) => Number(r.user_id) === Number(targetUser.id));
         const total = Number(targetRoutes.length || 0);
         if (total <= 0) {
-            api.notify("该学生暂无可删除线路", true);
+            api.notify("该用户暂无可删除线路", true);
             return;
         }
         if (!window.confirm(`确认删除 ${targetUser.name} 的全部 ${total} 条线路？`)) {
@@ -1078,7 +1278,7 @@ function AdminApp() {
                 selectedUserId ? loadSelectedSummary(selectedUserId) : Promise.resolve(),
             ]);
         } catch (err) {
-            api.notify(err.message || "删除学生线路失败", true);
+            api.notify(err.message || "删除用户线路失败", true);
         } finally {
             setDeleteUserRoutesBusy(false);
         }
@@ -1167,8 +1367,8 @@ function AdminApp() {
             <header className="ios-card mb-4 rounded-[1.4rem] border border-blue-100 bg-white/80 px-4 py-3 sm:rounded-[2rem] sm:px-6 sm:py-4 shadow-soft">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                        <div className="text-2xl font-black text-admin-600">WebGIS 教师管理后台</div>
-                        <div className="text-sm font-semibold text-slate-500">线路总览、学生筛选与账户管理</div>
+                        <div className="text-2xl font-black text-admin-600">管理后台</div>
+                        <div className="text-sm font-semibold text-slate-500">线路总览与账户管理</div>
                         {me && (
                             <div className="mt-0.5 text-xs font-semibold text-slate-500">
                                 当前账户：{me.name}（{me.username || "-"}）
@@ -1178,14 +1378,105 @@ function AdminApp() {
                     <div className="w-full xl:w-auto">
                         <div className="flex items-center gap-2 overflow-x-auto pb-1 xl:flex-wrap xl:justify-end xl:overflow-visible xl:pb-0">
                             <button onClick={refreshData} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">刷新数据</button>
-                            <button onClick={generateAllOdMap} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">展示全部线路</button>
-                            <button onClick={() => exportOdPoster("png")} disabled={exportingPoster} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
-                            <button onClick={() => exportOdPoster("svg")} disabled={exportingPoster} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 disabled:opacity-60">导出 SVG</button>
+                            <button onClick={() => setExportPanelOpen((v) => !v)} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">{exportPanelOpen ? "收起导出设置" : "导出设置"}</button>
+                            <button onClick={exportOdPoster} disabled={exportingPoster} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 disabled:opacity-60">{exportingPoster ? "导出中..." : "导出OD图 PNG"}</button>
                             <button onClick={() => window.location.href = "/admin/accounts"} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">账户管理</button>
                             <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">账户中心</button>
-                            <a href="/api/export/users-csv" className="btn-primary shrink-0 rounded-xl bg-admin-600 px-4 py-2.5 text-sm font-bold text-white transition-all">导出学生 CSV</a>
                             <button onClick={toggleThemeMode} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">{themeMode === "dark" ? "浅色模式" : "深色模式"}</button>
                             <button onClick={logout} className="shrink-0 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-bold text-rose-600 transition-all hover:bg-rose-50">退出登录</button>
+                        </div>
+                    </div>
+                </div>
+                <div className={`ios-collapse ${exportPanelOpen ? "mt-3 max-h-[1800px] opacity-100" : "max-h-0 opacity-0"}`}>
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-3.5 sm:p-4">
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                            <div className="text-sm font-black text-admin-600">OD 导出高级选项</div>
+                            <button type="button" onClick={resetExportOptions} className="rounded-lg border border-blue-200 bg-white px-3 py-1 text-xs font-bold text-slate-600 transition-all hover:bg-slate-50">恢复默认</button>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">导出标题</div>
+                                <input value={exportOptions.title} onChange={(e) => updateExportOption("title", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm" placeholder="OD 全量/筛选线路导出图" />
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">副标题（可选）</div>
+                                <input value={exportOptions.subtitle} onChange={(e) => updateExportOption("subtitle", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm" placeholder="留空将自动生成说明" />
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">文件名前缀</div>
+                                <input value={exportOptions.filePrefix} onChange={(e) => updateExportOption("filePrefix", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm" placeholder="od_admin" />
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">导出清晰度</div>
+                                <select value={exportOptions.quality} onChange={(e) => updateExportOption("quality", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm">
+                                    <option value="standard">标准（1600×900）</option>
+                                    <option value="high">高清（1920×1080）</option>
+                                    <option value="ultra">超清（2560×1440）</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">配色方式</div>
+                                <select value={exportOptions.colorMode} onChange={(e) => updateExportOption("colorMode", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm">
+                                    <option value="category">按分类配色（固定）</option>
+                                    <option value="person-random">按人员随机配色</option>
+                                    <option value="person-palette">按人员调色板配色</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">线条样式</div>
+                                <select value={exportOptions.lineStyle} onChange={(e) => updateExportOption("lineStyle", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm">
+                                    <option value="flow">流线虚实</option>
+                                    <option value="solid">纯实线</option>
+                                    <option value="dashed">均匀虚线</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">名字标签</div>
+                                <select value={exportOptions.labelMode} onChange={(e) => updateExportOption("labelMode", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm">
+                                    <option value="none">不显示</option>
+                                    <option value="name">仅姓名</option>
+                                    <option value="detail">姓名 + 分类</option>
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">标签上限</div>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="1200"
+                                    value={exportOptions.labelLimit}
+                                    onChange={(e) => updateExportOption("labelLimit", e.target.value)}
+                                    className="modern-input w-full rounded-xl px-3 py-2 text-sm"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">随机色种子（可选）</div>
+                                <input value={exportOptions.randomSeed} onChange={(e) => updateExportOption("randomSeed", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm" placeholder="留空自动随机" />
+                            </div>
+                            <div className="space-y-1">
+                                <div className="text-xs font-semibold text-slate-500">端点地名标注</div>
+                                <select value={exportOptions.endpointLabelMode} onChange={(e) => updateExportOption("endpointLabelMode", e.target.value)} className="modern-input w-full rounded-xl px-3 py-2 text-sm">
+                                    <option value="none">不显示</option>
+                                    <option value="origin">仅起点</option>
+                                    <option value="destination">仅终点</option>
+                                    <option value="both">起点 + 终点</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <label className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                                <input type="checkbox" checked={!!exportOptions.showLegend} onChange={(e) => updateExportOption("showLegend", e.target.checked)} className="h-4 w-4" />
+                                导出显示图例
+                            </label>
+                            <label className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                                <input type="checkbox" checked={!!exportOptions.mapOverlay} onChange={(e) => updateExportOption("mapOverlay", e.target.checked)} className="h-4 w-4" />
+                                PNG 叠加当前底图
+                            </label>
+                            <label className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                                <input type="checkbox" checked={!!exportOptions.showDistance} onChange={(e) => updateExportOption("showDistance", e.target.checked)} className="h-4 w-4" />
+                                显示距离标注
+                            </label>
+                            <div className="text-xs font-semibold text-slate-500">提示：导出为 PNG 格式，可选叠加当前底图。</div>
                         </div>
                     </div>
                 </div>
@@ -1195,12 +1486,12 @@ function AdminApp() {
                 {!mapFullscreen && (
                     <aside className="order-2 ios-card rounded-[1.4rem] border border-blue-100 bg-white/80 p-3 shadow-soft sm:rounded-[2rem] sm:p-5 lg:order-1 lg:flex lg:h-[calc(100vh-220px)] lg:flex-col lg:overflow-hidden">
                         <div className="mb-2 flex items-center justify-between">
-                            <div className="text-lg font-black text-admin-600">学生列表</div>
+                            <div className="text-lg font-black text-admin-600">用户列表</div>
                             <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-bold text-admin-600">{users.length}</span>
                         </div>
 
                         <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50/50 px-2 py-1.5 text-xs font-semibold text-slate-600">
-                            单击选择学生，双击缩放到该学生线路，右键打开操作菜单（删除路线/账户）
+                            单击选择用户，双击定位线路，右键打开操作菜单
                         </div>
 
                         <input
@@ -1220,8 +1511,10 @@ function AdminApp() {
                                 <option value="online">在线</option>
                                 <option value="offline">离线</option>
                             </select>
-                            <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-2 py-1 text-xs font-semibold text-slate-600">
-                                已多选学生：{selectedUserIds.length} 人（支持 Ctrl/⌘ + 单击）
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-semibold text-slate-600">已选 {selectedUserIds.length}/{users.length}</span>
+                                <button type="button" onClick={selectAllUsers} className="rounded-lg border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-bold text-admin-600 transition-all hover:bg-blue-50">全选</button>
+                                <button type="button" onClick={deselectAllUsers} className="rounded-lg border border-blue-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600 transition-all hover:bg-slate-50">取消全选</button>
                             </div>
                         </div>
 
@@ -1230,7 +1523,6 @@ function AdminApp() {
                                 <div
                                     key={u.id}
                                     onClick={(e) => handleStudentClick(e, u)}
-                                    onDoubleClick={() => zoomToStudent(u.id)}
                                     onContextMenu={(e) => openStudentContextMenu(e, u)}
                                     className={`w-full rounded-xl border p-3 text-left transition-all ${Number(selectedUserId) === Number(u.id) || selectedUserIdSet.has(Number(u.id))
                                         ? "border-admin-300 bg-blue-50/80 shadow-sm"
@@ -1246,14 +1538,15 @@ function AdminApp() {
                                     }}
                                 >
                                     <div className="flex items-center gap-2">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedUserIdSet.has(Number(u.id))}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onChange={(e) => toggleUserSelection(u.id, e.target.checked)}
-                                            className="h-4 w-4"
-                                            title="加入多选"
-                                        />
+                                        <label className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedUserIdSet.has(Number(u.id))}
+                                                onChange={(e) => toggleUserSelection(u.id, e.target.checked)}
+                                                className="h-4 w-4 cursor-pointer"
+                                                title="加入多选"
+                                            />
+                                        </label>
                                         <img
                                             src={u.avatar_url || "/static/images/avatar-default.svg"}
                                             alt={u.name}
@@ -1265,16 +1558,26 @@ function AdminApp() {
                                                 用户名：{u.username || "未设置"}
                                             </div>
                                         </div>
-                                        <div className="text-right text-xs font-bold text-slate-500">
-                                            <div>{api.fmtNumber(u.route_count)} 条</div>
-                                            <div>{u.status}</div>
+                                        <div className="flex items-center gap-1.5 text-right text-xs font-bold text-slate-500">
+                                            <div>
+                                                <div>{api.fmtNumber(u.route_count)} 条</div>
+                                                <div>{u.status}</div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                title="定位该用户"
+                                                onClick={(e) => { e.stopPropagation(); zoomToStudent(u.id); }}
+                                                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-white text-admin-600 transition-all hover:bg-blue-50"
+                                            >
+                                                📍
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
                             ))}
 
                             {users.length === 0 && (
-                                <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm font-semibold text-slate-500">没有匹配的学生</div>
+                                <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm font-semibold text-slate-500">没有匹配的用户</div>
                             )}
                         </div>
                     </aside>
@@ -1307,14 +1610,14 @@ function AdminApp() {
                         </div>
 
                         <div className={`ios-collapse ${filterPanelOpen ? "mt-2 max-h-[900px] opacity-100" : "max-h-0 opacity-0"}`}>
-                            <div className="text-xs font-semibold text-slate-500">学生范围</div>
+                            <div className="text-xs font-semibold text-slate-500">用户范围</div>
                             <div className="mt-1 grid grid-cols-2 gap-2">
                                 <button
                                     type="button"
                                     onClick={showAllStudentsRoutes}
                                     className={`rounded-xl border px-3 py-2 text-xs font-bold transition-all ${!onlySelectedStudent ? "border-admin-300 bg-blue-50/80 shadow-sm text-admin-600" : "border-blue-200 bg-white text-slate-600 hover:border-admin-200"}`}
                                 >
-                                    全部学生
+                                    全部用户
                                 </button>
                                 <button
                                     type="button"
@@ -1322,12 +1625,12 @@ function AdminApp() {
                                     disabled={selectedUserIds.length === 0}
                                     className={`rounded-xl border px-3 py-2 text-xs font-bold transition-all disabled:opacity-60 ${onlySelectedStudent ? "border-admin-300 bg-blue-50/80 shadow-sm text-admin-600" : "border-blue-200 bg-white text-slate-600 hover:border-admin-200"}`}
                                 >
-                                    仅选中学生
+                                    仅选中用户
                                 </button>
                             </div>
 
                             <div className="mt-2 text-xs font-semibold text-slate-500">
-                                线路多选筛选：已选 {selectedRouteIds.length} 条（在右侧“选中学生线路”勾选）
+                                线路多选筛选：已选 {selectedRouteIds.length} 条（在右侧“选中线路”勾选）
                             </div>
                             <div className="mt-1 flex items-center gap-2">
                                 <button
@@ -1376,13 +1679,18 @@ function AdminApp() {
                                 className="modern-input mt-1 w-full rounded-xl px-3 py-2 text-xs"
                             >
                                 <option value="none">不显示标注</option>
-                                <option value="simple">仅姓名标注</option>
-                                <option value="detail">姓名 + 分类</option>
+                                <option value="name">姓名标注</option>
+                                <option value="od">起点→终点地名</option>
+                                <option value="full">姓名 + 地名 + 分类</option>
+                                <option value="distance">直线距离 (km)</option>
                             </select>
 
                             <div className="mt-2 flex items-center justify-between">
                                 <div className="text-xs font-semibold text-slate-500">可见线路：{api.fmtNumber(activeRoutes.length)} 条</div>
-                                <button type="button" onClick={clearMapFilters} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition-all hover:bg-slate-50">重置筛选</button>
+                                <div className="flex items-center gap-2">
+                                    <button type="button" onClick={generateAllOdMap} className="rounded-xl border border-admin-200 bg-admin-50 px-3 py-2 text-xs font-bold text-admin-600 transition-all hover:bg-blue-100/70">展示全部线路</button>
+                                    <button type="button" onClick={clearMapFilters} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition-all hover:bg-slate-50">重置筛选</button>
+                                </div>
                             </div>
                             <div className="mt-1 text-xs font-semibold text-slate-500">底图：{baseMapMode === "satellite" ? "卫星影像" : "矢量地图"}</div>
                         </div>
@@ -1419,14 +1727,14 @@ function AdminApp() {
                                     onClick={() => zoomToStudent(selectedUser.id)}
                                     className="rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-xs font-bold text-admin-600"
                                 >
-                                    定位该学生
+                                    定位该用户
                                 </button>
                                 <button
                                     type="button"
                                     onClick={showOnlyCurrentStudent}
                                     className="rounded-lg border border-admin-200 bg-admin-50 px-2 py-1.5 text-xs font-bold text-admin-600"
                                 >
-                                    仅显示该学生
+                                    仅显示该用户
                                 </button>
                                 <button
                                     type="button"
@@ -1443,12 +1751,12 @@ function AdminApp() {
                 {!mapFullscreen && (
                     <aside className="order-3 ios-card space-y-2.5 overflow-auto rounded-[1.4rem] border border-blue-100 bg-white/95 p-3 shadow-soft sm:rounded-2xl lg:col-span-2 2xl:col-span-1 2xl:max-h-[calc(100vh-220px)]">
                         <div className="grid grid-cols-2 gap-2">
-                            <MetricCard title="学生总数" value={api.fmtNumber(overview.total_students || 0)} />
-                            <MetricCard title="在线学生" value={api.fmtNumber(overview.active_students || 0)} />
+                            <MetricCard title="用户总数" value={api.fmtNumber(overview.total_students || 0)} />
+                            <MetricCard title="在线用户" value={api.fmtNumber(overview.active_students || 0)} />
                             <MetricCard title="今日新增" value={api.fmtNumber(overview.new_students_today || 0)} />
                             <MetricCard title="路线总数" value={api.fmtNumber(overview.total_routes || 0)} />
                             <MetricCard
-                                title="路线最多学生"
+                                title="路线最多用户"
                                 value={overview.top_student ? overview.top_student.name : "暂无"}
                                 hint={overview.top_student ? `ID: ${overview.top_student.id}` : ""}
                             />
@@ -1456,7 +1764,7 @@ function AdminApp() {
 
                         <div className="rounded-xl border border-blue-100 p-2.5">
                             <div className="mb-2 flex items-center justify-between">
-                                <div className="text-xs font-black text-admin-600">选中学生线路</div>
+                                <div className="text-xs font-black text-admin-600">选中线路</div>
                                 <div className="flex items-center gap-2">
                                     <button
                                         onClick={() => {
@@ -1465,7 +1773,7 @@ function AdminApp() {
                                         }}
                                         className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
                                     >
-                                        定位学生
+                                        定位用户
                                     </button>
                                     <button
                                         type="button"
@@ -1558,7 +1866,7 @@ function AdminApp() {
                                     </div>
                                 ))}
                                 {selectedUserRoutes.length === 0 && (
-                                    <div className="text-sm font-semibold text-slate-500">暂无该学生线路</div>
+                                    <div className="text-sm font-semibold text-slate-500">暂无该用户线路</div>
                                 )}
                             </div>
                         </div>
@@ -1604,7 +1912,7 @@ function AdminApp() {
                             }}
                             className="rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-admin-600"
                         >
-                            显示全部学生
+                            显示全部用户
                         </button>
                         <button
                             type="button"
@@ -1615,11 +1923,11 @@ function AdminApp() {
                             }}
                             className="rounded-md border border-admin-200 bg-admin-50 px-2 py-1 text-xs font-bold text-admin-600"
                         >
-                            仅显示该学生
+                            仅显示该用户
                         </button>
                     </div>
 
-                    <div className="mt-2 text-xs font-semibold text-slate-500">选择该学生的一条线路</div>
+                    <div className="mt-2 text-xs font-semibold text-slate-500">选择该用户的一条线路</div>
                     <select
                         value={studentContextMenu.routeId}
                         onChange={(e) => setStudentContextMenu((prev) => ({ ...prev, routeId: e.target.value }))}
@@ -1659,7 +1967,7 @@ function AdminApp() {
                             onClick={() => removeSelectedUserRoutes(studentContextMenu.user)}
                             className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700 disabled:opacity-60"
                         >
-                            {deleteUserRoutesBusy ? "删除中..." : "删除该学生全部路线"}
+                            {deleteUserRoutesBusy ? "删除中..." : "删除该用户全部路线"}
                         </button>
                         <button
                             type="button"
@@ -1667,7 +1975,7 @@ function AdminApp() {
                             onClick={() => removeAccount(studentContextMenu.user)}
                             className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-bold text-rose-600 disabled:opacity-60"
                         >
-                            {accountDeleteBusyId === studentContextMenu.user.id ? "删除中..." : "删除该学生账户"}
+                            {accountDeleteBusyId === studentContextMenu.user.id ? "删除中..." : "删除该用户账户"}
                         </button>
                     </div>
                 </div>
@@ -1688,4 +1996,3 @@ if (ReactDOM.createRoot) {
 } else {
     ReactDOM.render(<AdminApp />, adminRootNode);
 }
-
