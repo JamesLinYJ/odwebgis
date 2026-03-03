@@ -20,7 +20,7 @@ DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 PASSWORD_MIN_LENGTH = 6
 PASSWORD_MAX_LENGTH = 64
 LOCAL_DEFAULT_AVATAR = "/static/images/avatar-default.svg"
-SCHEMA_VERSION = "20260228_v2"
+SCHEMA_VERSION = "20260303_v3"
 
 
 def utc_now_text() -> str:
@@ -130,6 +130,7 @@ def rebuild_schema(db: sqlite3.Connection) -> None:
         DROP TABLE IF EXISTS alerts;
         DROP TABLE IF EXISTS od_routes;
         DROP TABLE IF EXISTS nodes;
+        DROP TABLE IF EXISTS user_login_history;
         DROP TABLE IF EXISTS users;
 
         CREATE TABLE users (
@@ -143,6 +144,7 @@ def rebuild_schema(db: sqlite3.Connection) -> None:
             failed_login_count INTEGER NOT NULL DEFAULT 0 CHECK(failed_login_count >= 0),
             lock_until TEXT,
             force_password_change INTEGER NOT NULL DEFAULT 0 CHECK(force_password_change IN (0, 1)),
+            register_ip TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             last_active_at TEXT NOT NULL
         );
@@ -150,6 +152,17 @@ def rebuild_schema(db: sqlite3.Connection) -> None:
         CREATE INDEX idx_users_user_type ON users(user_type);
         CREATE INDEX idx_users_status ON users(status);
         CREATE INDEX idx_users_last_active ON users(last_active_at);
+        CREATE INDEX idx_users_register_ip ON users(register_ip);
+
+        CREATE TABLE user_login_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            ip_address TEXT NOT NULL,
+            login_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_login_history_user_time ON user_login_history(user_id, login_at DESC, id DESC);
 
         CREATE TABLE nodes (
             code TEXT PRIMARY KEY,
@@ -245,6 +258,7 @@ def row_payload(db: sqlite3.Connection, row: sqlite3.Row) -> dict:
         "failed_login_count": int(row["failed_login_count"] or 0),
         "lock_until": row["lock_until"] or "",
         "force_password_change": int(row["force_password_change"] or 0),
+        "register_ip": row["register_ip"] or "",
         "created_at": row["created_at"] or "",
         "last_active_at": row["last_active_at"] or "",
         "route_count": route_count,
@@ -349,8 +363,8 @@ def cmd_create(args: argparse.Namespace) -> int:
             """
             INSERT INTO users(
                 name, user_type, status, avatar_url, username, password_hash,
-                failed_login_count, lock_until, force_password_change, created_at, last_active_at
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                failed_login_count, lock_until, force_password_change, register_ip, created_at, last_active_at
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 name,
@@ -362,6 +376,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 0,
                 None,
                 force_password_change,
+                (args.register_ip or "").strip()[:128],
                 now_text,
                 now_text,
             ),
@@ -587,6 +602,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_create.add_argument("--avatar-url", default=LOCAL_DEFAULT_AVATAR)
     p_create.add_argument("--password")
     p_create.add_argument("--password-sha256")
+    p_create.add_argument("--register-ip", default="")
     p_create.add_argument("--force-change", action="store_true")
     p_create.set_defaults(func=cmd_create)
 

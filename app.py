@@ -39,7 +39,7 @@ TILE_RATE_LIMIT_PER_MIN = 900
 TILE_RATE_WINDOW_SECONDS = 60
 TILE_CACHE_DIR = os.path.join(BASE_DIR, ".tile_cache")
 TILE_CACHE_TTL_SECONDS = 86400
-SCHEMA_VERSION = "20260228_v2"
+SCHEMA_VERSION = "20260303_v3"
 COORD_SYSTEM_WGS84 = "wgs84"
 COORD_SYSTEM_GCJ02 = "gcj02"
 GCJ_A = 6378245.0
@@ -124,6 +124,72 @@ def normalize_password_secret(password: str) -> str:
         if len(digest) == 64 and all(ch in "0123456789abcdef" for ch in digest):
             return digest
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def extract_client_ip(req: Any) -> str:
+    # 优先取反向代理头，缺失时回退到直连地址
+    forwarded = (req.headers.get("X-Forwarded-For") or "").strip()
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first[:128]
+    real_ip = (req.headers.get("X-Real-IP") or "").strip()
+    if real_ip:
+        return real_ip[:128]
+    remote = (req.remote_addr or "").strip()
+    return remote[:128] if remote else ""
+
+
+def append_login_ip_history(
+    db: sqlite3.Connection,
+    user_id: int,
+    ip_address: str,
+    login_at: str | None = None,
+    keep: int = 10,
+) -> None:
+    ts = (login_at or utc_now_text()).strip() or utc_now_text()
+    ip = (ip_address or "").strip()[:128]
+    db.execute(
+        """
+        INSERT INTO user_login_history(user_id, ip_address, login_at)
+        VALUES(?,?,?)
+        """,
+        (int(user_id), ip, ts),
+    )
+    db.execute(
+        """
+        DELETE FROM user_login_history
+        WHERE user_id = ?
+          AND id NOT IN (
+              SELECT id
+              FROM user_login_history
+              WHERE user_id = ?
+              ORDER BY datetime(login_at) DESC, id DESC
+              LIMIT ?
+          )
+        """,
+        (int(user_id), int(user_id), int(max(1, keep))),
+    )
+
+
+def fetch_login_ip_history(db: sqlite3.Connection, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    rows = db.execute(
+        """
+        SELECT ip_address, login_at
+        FROM user_login_history
+        WHERE user_id = ?
+        ORDER BY datetime(login_at) DESC, id DESC
+        LIMIT ?
+        """,
+        (int(user_id), int(max(1, limit))),
+    ).fetchall()
+    return [
+        {
+            "ip": (r["ip_address"] or ""),
+            "login_at": (r["login_at"] or ""),
+        }
+        for r in rows
+    ]
 
 
 def get_tianditu_api_key() -> str:
@@ -549,12 +615,13 @@ def create_app() -> Flask:
         now = utc_now_text()
         avatar_url = LOCAL_DEFAULT_AVATAR
 
+        register_ip = extract_client_ip(request)
         cur = db.execute(
             """
             INSERT INTO users(
                 name, username, user_type, status, avatar_url, password_hash, created_at, last_active_at,
-                force_password_change, failed_login_count, lock_until
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                force_password_change, failed_login_count, lock_until, register_ip
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 name,
@@ -568,6 +635,7 @@ def create_app() -> Flask:
                 0,
                 0,
                 None,
+                register_ip,
             ),
         )
         db.commit()
@@ -579,6 +647,7 @@ def create_app() -> Flask:
             "UPDATE users SET status = 'online', last_active_at = ? WHERE id = ?",
             (utc_now_text(), new_id),
         )
+        append_login_ip_history(db, new_id, register_ip, utc_now_text(), keep=10)
         db.commit()
         return jsonify({"ok": True, "user_id": new_id, "redirect": "/"})
 
@@ -607,12 +676,13 @@ def create_app() -> Flask:
             username = f"g_{uuid.uuid4().hex[:16]}"
 
         guest_secret = hashlib.sha256(f"guest:{name}:{time.time_ns()}".encode("utf-8")).hexdigest()
+        register_ip = extract_client_ip(request)
         cur = db.execute(
             """
             INSERT INTO users(
                 name, username, user_type, status, avatar_url, password_hash, created_at, last_active_at,
-                force_password_change, failed_login_count, lock_until
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                force_password_change, failed_login_count, lock_until, register_ip
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 name,
@@ -626,6 +696,7 @@ def create_app() -> Flask:
                 0,
                 0,
                 None,
+                register_ip,
             ),
         )
         db.commit()
@@ -633,6 +704,8 @@ def create_app() -> Flask:
         session.clear()
         session["user_id"] = int(cur.lastrowid)
         session.permanent = True
+        append_login_ip_history(db, int(cur.lastrowid), register_ip, utc_now_text(), keep=10)
+        db.commit()
         return jsonify({"ok": True, "user_id": int(cur.lastrowid), "redirect": "/"})
 
     @app.post("/api/auth/login")
@@ -720,6 +793,7 @@ def create_app() -> Flask:
             """,
             (utc_now_text(), uid),
         )
+        append_login_ip_history(db, uid, extract_client_ip(request), utc_now_text(), keep=10)
         db.commit()
         redirect_path = "/admin" if row["user_type"] == "admin" else "/"
         return jsonify(
@@ -1091,8 +1165,20 @@ def create_app() -> Flask:
                 "user": user_row_to_dict(user),
                 "routes": [route_row_to_dict(r) for r in routes],
                 "categories": [dict(r) for r in categories],
+                "login_history": fetch_login_ip_history(db, int(user["id"]), limit=10),
             }
         )
+
+    @app.get("/api/admin/accounts/<int:account_id>/login-history")
+    def admin_account_login_history(account_id: int) -> Any:
+        _, err = require_admin()
+        if err:
+            return err
+        db = get_db()
+        target = db.execute("SELECT id FROM users WHERE id = ?", (account_id,)).fetchone()
+        if target is None:
+            return jsonify({"ok": False, "message": "账户不存在"}), 404
+        return jsonify({"ok": True, "history": fetch_login_ip_history(db, int(account_id), limit=10)})
 
     @app.get("/api/alerts")
     def list_alerts() -> Any:
@@ -1331,8 +1417,8 @@ def create_app() -> Flask:
             """
             INSERT INTO users(
                 name, username, user_type, status, avatar_url, password_hash, created_at, last_active_at,
-                force_password_change, failed_login_count, lock_until
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                force_password_change, failed_login_count, lock_until, register_ip
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 name,
@@ -1346,6 +1432,7 @@ def create_app() -> Flask:
                 1,
                 0,
                 None,
+                extract_client_ip(request),
             ),
         )
         db.execute(
@@ -1439,8 +1526,9 @@ def create_app() -> Flask:
         db.commit()
         return jsonify({"ok": True})
 
+    @app.get("/api/export/accounts-csv")
     @app.get("/api/export/users-csv")
-    def export_users_csv() -> Any:
+    def export_accounts_csv() -> Any:
         _, err = require_admin()
         if err:
             return err
@@ -1481,7 +1569,7 @@ def create_app() -> Flask:
             io.BytesIO(data),
             mimetype="text/csv",
             as_attachment=True,
-            download_name="webgis_users_export.csv",
+            download_name="webgis_accounts_export.csv",
         )
 
     return app
@@ -1829,6 +1917,7 @@ def init_db() -> None:
             DROP TABLE IF EXISTS alerts;
             DROP TABLE IF EXISTS od_routes;
             DROP TABLE IF EXISTS nodes;
+            DROP TABLE IF EXISTS user_login_history;
             DROP TABLE IF EXISTS users;
 
             CREATE TABLE users (
@@ -1842,6 +1931,7 @@ def init_db() -> None:
                 failed_login_count INTEGER NOT NULL DEFAULT 0 CHECK(failed_login_count >= 0),
                 lock_until TEXT,
                 force_password_change INTEGER NOT NULL DEFAULT 0 CHECK(force_password_change IN (0, 1)),
+                register_ip TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 last_active_at TEXT NOT NULL
             );
@@ -1849,6 +1939,17 @@ def init_db() -> None:
             CREATE INDEX idx_users_user_type ON users(user_type);
             CREATE INDEX idx_users_status ON users(status);
             CREATE INDEX idx_users_last_active ON users(last_active_at);
+            CREATE INDEX idx_users_register_ip ON users(register_ip);
+
+            CREATE TABLE user_login_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                ip_address TEXT NOT NULL,
+                login_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX idx_login_history_user_time ON user_login_history(user_id, login_at DESC, id DESC);
 
             CREATE TABLE nodes (
                 code TEXT PRIMARY KEY,
