@@ -1,3 +1,7 @@
+﻿# 【中文注释】
+# 文件说明：manage_accounts.py 为项目自研源码文件，包含核心业务逻辑。
+# 维护约定：变更前先确认输入输出与调用链，避免影响前后端联调。
+
 import argparse
 import getpass
 import hashlib
@@ -27,9 +31,9 @@ def normalize_user_status(status, default="offline"):
     value = (status or "").strip().lower()
     if not value:
         return default
-    if value in {"在线", "online"}:
+    if value in {"鍦ㄧ嚎", "online"}:
         return "online"
-    if value in {"离线", "offline"}:
+    if value in {"绂荤嚎", "offline"}:
         return "offline"
     return default
 
@@ -37,28 +41,28 @@ def normalize_user_status(status, default="offline"):
 def validate_username(username):
     value = (username or "").strip()
     if not value:
-        return "用户名不能为空"
+        return "鐢ㄦ埛鍚嶄笉鑳戒负绌?
     if any(ch.isspace() for ch in value):
-        return "用户名不能包含空格"
+        return "鐢ㄦ埛鍚嶄笉鑳藉寘鍚┖鏍?
     if len(value) < 3:
-        return "用户名至少 3 位"
+        return "鐢ㄦ埛鍚嶈嚦灏?3 浣?
     if len(value) > 24:
-        return "用户名长度不能超过 24 位"
+        return "鐢ㄦ埛鍚嶉暱搴︿笉鑳借秴杩?24 浣?
     return None
 
 
 def validate_password(password, username=""):
     value = str(password or "")
     if len(value) < PASSWORD_MIN_LENGTH:
-        return f"密码至少 {PASSWORD_MIN_LENGTH} 位"
+        return f"瀵嗙爜鑷冲皯 {PASSWORD_MIN_LENGTH} 浣?
     if len(value) > PASSWORD_MAX_LENGTH:
-        return f"密码长度不能超过 {PASSWORD_MAX_LENGTH} 位"
+        return f"瀵嗙爜闀垮害涓嶈兘瓒呰繃 {PASSWORD_MAX_LENGTH} 浣?
     if any(ch.isspace() for ch in value):
-        return "密码不能包含空格"
+        return "瀵嗙爜涓嶈兘鍖呭惈绌烘牸"
     if not all(33 <= ord(ch) <= 126 for ch in value):
-        return "密码仅支持英文、数字和常见符号，不支持中文或全角字符"
+        return "瀵嗙爜浠呮敮鎸佽嫳鏂囥€佹暟瀛楀拰甯歌绗﹀彿锛屼笉鏀寔涓枃鎴栧叏瑙掑瓧绗?
     if username and value.lower() == username.lower():
-        return "密码不能与用户名相同"
+        return "瀵嗙爜涓嶈兘涓庣敤鎴峰悕鐩稿悓"
     return None
 
 
@@ -76,21 +80,21 @@ def digest_from_sha256(sha256_value):
     if text.startswith("sha256:"):
         text = text[7:].strip().lower()
     if len(text) != 64 or any(ch not in "0123456789abcdef" for ch in text):
-        raise ValueError("password_sha256 格式无效，需要 64 位十六进制")
+        raise ValueError("password_sha256 鏍煎紡鏃犳晥锛岄渶瑕?64 浣嶅崄鍏繘鍒?)
     return text
 
 
-def prompt_password_interactive(label="密码"):
+def prompt_password_interactive(label="瀵嗙爜"):
     if not sys.stdin.isatty():
-        raise ValueError("缺少密码参数：请提供 --password 或 --password-sha256")
+        raise ValueError("缂哄皯瀵嗙爜鍙傛暟锛氳鎻愪緵 --password 鎴?--password-sha256")
     while True:
         first = getpass.getpass(f"{label}: ")
-        second = getpass.getpass("确认密码: ")
+        second = getpass.getpass("纭瀵嗙爜: ")
         if not first:
-            print("[WARN] 密码不能为空")
+            print("[WARN] 瀵嗙爜涓嶈兘涓虹┖")
             continue
         if first != second:
-            print("[WARN] 两次输入不一致，请重试")
+            print("[WARN] 涓ゆ杈撳叆涓嶄竴鑷达紝璇烽噸璇?)
             continue
         return first
 
@@ -99,7 +103,7 @@ def resolve_password_digest(plain_password, password_sha256, username="", allow_
     has_plain = plain_password is not None
     has_sha = password_sha256 is not None
     if has_plain and has_sha:
-        raise ValueError("只能提供 --password 或 --password-sha256 其中一个")
+        raise ValueError("鍙兘鎻愪緵 --password 鎴?--password-sha256 鍏朵腑涓€涓?)
 
     if has_sha:
         return digest_from_sha256(password_sha256)
@@ -107,9 +111,9 @@ def resolve_password_digest(plain_password, password_sha256, username="", allow_
     if has_plain:
         plain = str(plain_password or "")
     elif allow_prompt:
-        plain = prompt_password_interactive("输入密码")
+        plain = prompt_password_interactive("杈撳叆瀵嗙爜")
     else:
-        raise ValueError("缺少密码参数：请提供 --password 或 --password-sha256")
+        raise ValueError("缂哄皯瀵嗙爜鍙傛暟锛氳鎻愪緵 --password 鎴?--password-sha256")
 
     err = validate_password(plain, username)
     if err:
@@ -199,7 +203,7 @@ def ensure_schema(db):
             """,
             (SCHEMA_VERSION,),
         )
-        print(f"[INFO] 数据库结构已重建为新版（schema={SCHEMA_VERSION}），旧数据已丢弃。")
+        print(f"[INFO] 鏁版嵁搴撶粨鏋勫凡閲嶅缓涓烘柊鐗堬紙schema={SCHEMA_VERSION}锛夛紝鏃ф暟鎹凡涓㈠純銆?)
     db.commit()
 
 
@@ -212,7 +216,7 @@ def get_db():
 
 def resolve_user(db, user_id, username):
     if (user_id is None) == (username is None):
-        raise ValueError("必须且只能指定 --id 或 --username")
+        raise ValueError("蹇呴』涓斿彧鑳芥寚瀹?--id 鎴?--username")
     if user_id is not None:
         row = db.execute("SELECT * FROM users WHERE id = ?", (int(user_id),)).fetchone()
     else:
@@ -221,7 +225,7 @@ def resolve_user(db, user_id, username):
             ((username or "").strip(),),
         ).fetchone()
     if row is None:
-        raise ValueError("目标账户不存在")
+        raise ValueError("鐩爣璐︽埛涓嶅瓨鍦?)
     return row
 
 
@@ -297,12 +301,12 @@ def cmd_list(args):
             return 0
 
         if not payload:
-            print("无账户记录")
+            print("鏃犺处鎴疯褰?)
             return 0
 
         header = (
-            f"{'ID':<4} {'用户名':<24} {'姓名':<12} {'类型':<8} {'状态':<8} "
-            f"{'路线':<6} {'失败次数':<8} {'锁定':<6} {'需改密':<6} {'最后活跃'}"
+            f"{'ID':<4} {'鐢ㄦ埛鍚?:<24} {'濮撳悕':<12} {'绫诲瀷':<8} {'鐘舵€?:<8} "
+            f"{'璺嚎':<6} {'澶辫触娆℃暟':<8} {'閿佸畾':<6} {'闇€鏀瑰瘑':<6} {'鏈€鍚庢椿璺?}"
         )
         print(header)
         print("-" * len(header))
@@ -333,16 +337,16 @@ def cmd_show(args):
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0
         print(f"ID: {payload['id']}")
-        print(f"姓名: {payload['name']}")
-        print(f"用户名: {payload['username']}")
-        print(f"类型: {payload['user_type']}")
-        print(f"状态: {payload['status']}")
-        print(f"路线数量: {payload['route_count']}")
-        print(f"失败登录次数: {payload['failed_login_count']}")
-        print(f"锁定至: {payload['lock_until'] or '-'}")
-        print(f"下次登录强制改密: {'是' if payload['force_password_change'] else '否'}")
-        print(f"创建时间: {payload['created_at'] or '-'}")
-        print(f"最后活跃: {payload['last_active_at'] or '-'}")
+        print(f"濮撳悕: {payload['name']}")
+        print(f"鐢ㄦ埛鍚? {payload['username']}")
+        print(f"绫诲瀷: {payload['user_type']}")
+        print(f"鐘舵€? {payload['status']}")
+        print(f"璺嚎鏁伴噺: {payload['route_count']}")
+        print(f"澶辫触鐧诲綍娆℃暟: {payload['failed_login_count']}")
+        print(f"閿佸畾鑷? {payload['lock_until'] or '-'}")
+        print(f"涓嬫鐧诲綍寮哄埗鏀瑰瘑: {'鏄? if payload['force_password_change'] else '鍚?}")
+        print(f"鍒涘缓鏃堕棿: {payload['created_at'] or '-'}")
+        print(f"鏈€鍚庢椿璺? {payload['last_active_at'] or '-'}")
         return 0
     finally:
         db.close()
@@ -358,9 +362,9 @@ def cmd_create(args):
     if username_err:
         raise ValueError(username_err)
     if not name:
-        raise ValueError("姓名不能为空")
+        raise ValueError("濮撳悕涓嶈兘涓虹┖")
     if user_type not in {"student", "admin"}:
-        raise ValueError("user_type 仅支持 student/admin")
+        raise ValueError("user_type 浠呮敮鎸?student/admin")
 
     secret_digest = resolve_password_digest(args.password, args.password_sha256, username=username, allow_prompt=True)
 
@@ -371,7 +375,7 @@ def cmd_create(args):
             (username,),
         ).fetchone()
         if exists is not None:
-            raise ValueError("该用户名已存在")
+            raise ValueError("璇ョ敤鎴峰悕宸插瓨鍦?)
 
         now = utc_now_text()
         cur = db.execute(
@@ -406,7 +410,7 @@ def cmd_create(args):
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:
-            print(f"创建成功: id={result['id']}, username={username}, type={user_type}, status={status}")
+            print(f"鍒涘缓鎴愬姛: id={result['id']}, username={username}, type={user_type}, status={status}")
         return 0
     finally:
         db.close()
@@ -422,7 +426,7 @@ def cmd_update(args):
         if args.name is not None:
             value = args.name.strip()
             if not value:
-                raise ValueError("姓名不能为空")
+                raise ValueError("濮撳悕涓嶈兘涓虹┖")
             updates.append("name = ?")
             params.append(value)
 
@@ -436,7 +440,7 @@ def cmd_update(args):
                 (username_new, int(user["id"])),
             ).fetchone()
             if exists is not None:
-                raise ValueError("新用户名已存在")
+                raise ValueError("鏂扮敤鎴峰悕宸插瓨鍦?)
             updates.append("username = ?")
             params.append(username_new)
 
@@ -447,7 +451,7 @@ def cmd_update(args):
         if args.user_type is not None:
             user_type = args.user_type.strip().lower()
             if user_type not in {"student", "admin"}:
-                raise ValueError("user_type 仅支持 student/admin")
+                raise ValueError("user_type 浠呮敮鎸?student/admin")
             updates.append("user_type = ?")
             params.append(user_type)
 
@@ -460,7 +464,7 @@ def cmd_update(args):
             updates.extend(["failed_login_count = 0", "lock_until = NULL"])
 
         if not updates:
-            raise ValueError("没有可更新字段，请至少提供一个更新参数")
+            raise ValueError("娌℃湁鍙洿鏂板瓧娈碉紝璇疯嚦灏戞彁渚涗竴涓洿鏂板弬鏁?)
 
         updates.append("last_active_at = ?")
         params.append(utc_now_text())
@@ -474,7 +478,7 @@ def cmd_update(args):
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
-            print(f"更新成功: id={payload['id']}, username={payload['username']}, type={payload['user_type']}, status={payload['status']}")
+            print(f"鏇存柊鎴愬姛: id={payload['id']}, username={payload['username']}, type={payload['user_type']}, status={payload['status']}")
         return 0
     finally:
         db.close()
@@ -523,7 +527,7 @@ def cmd_reset_password(args):
                 )
             )
         else:
-            print(f"重置密码成功: id={int(user['id'])}, username={username}, force_change={force_value}")
+            print(f"閲嶇疆瀵嗙爜鎴愬姛: id={int(user['id'])}, username={username}, force_change={force_value}")
         return 0
     finally:
         db.close()
@@ -545,7 +549,7 @@ def cmd_unlock(args):
         if args.json:
             print(json.dumps({"ok": True, "id": int(user["id"]), "username": user["username"] or ""}, ensure_ascii=False, indent=2))
         else:
-            print(f"解锁成功: id={int(user['id'])}, username={user['username'] or ''}")
+            print(f"瑙ｉ攣鎴愬姛: id={int(user['id'])}, username={user['username'] or ''}")
         return 0
     finally:
         db.close()
@@ -563,8 +567,8 @@ def cmd_delete(args):
         if args.json:
             print(json.dumps({"ok": True, "deleted_user_id": uid}, ensure_ascii=False, indent=2))
         else:
-            extra = "（保留了路线数据）" if args.keep_routes else "（已同时删除该用户路线）"
-            print(f"删除成功: id={uid}, username={user['username'] or ''} {extra}")
+            extra = "锛堜繚鐣欎簡璺嚎鏁版嵁锛? if args.keep_routes else "锛堝凡鍚屾椂鍒犻櫎璇ョ敤鎴疯矾绾匡級"
+            print(f"鍒犻櫎鎴愬姛: id={uid}, username={user['username'] or ''} {extra}")
         return 0
     finally:
         db.close()
@@ -598,14 +602,14 @@ def cmd_stats(args):
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
-            print("账户统计")
-            print(f"- 总账户: {total_users}")
-            print(f"- 学生: {total_students}")
-            print(f"- 管理员: {total_admins}")
-            print(f"- 在线: {online_users}")
-            print(f"- 锁定中: {locked_users}")
-            print(f"- 需改密: {must_change}")
-            print(f"- 路线总数: {total_routes}")
+            print("璐︽埛缁熻")
+            print(f"- 鎬昏处鎴? {total_users}")
+            print(f"- 瀛︾敓: {total_students}")
+            print(f"- 绠＄悊鍛? {total_admins}")
+            print(f"- 鍦ㄧ嚎: {online_users}")
+            print(f"- 閿佸畾涓? {locked_users}")
+            print(f"- 闇€鏀瑰瘑: {must_change}")
+            print(f"- 璺嚎鎬绘暟: {total_routes}")
         return 0
     finally:
         db.close()
@@ -627,87 +631,87 @@ def cmd_reset_schema(args):
             (SCHEMA_VERSION,),
         )
         db.commit()
-        print(f"已重建数据库结构（schema={SCHEMA_VERSION}）")
+        print(f"宸查噸寤烘暟鎹簱缁撴瀯锛坰chema={SCHEMA_VERSION}锛?)
         return 0
     finally:
         db.close()
 
 
 def add_user_selector_arguments(parser):
-    parser.add_argument("--id", type=int, help="账户 ID")
-    parser.add_argument("--username", help="用户名")
+    parser.add_argument("--id", type=int, help="璐︽埛 ID")
+    parser.add_argument("--username", help="鐢ㄦ埛鍚?)
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="WebGIS 账户命令行管理（不依赖网页登录，直接管理数据库）"
+        description="WebGIS 璐︽埛鍛戒护琛岀鐞嗭紙涓嶄緷璧栫綉椤电櫥褰曪紝鐩存帴绠＄悊鏁版嵁搴擄級"
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_list = sub.add_parser("list", help="列出账户")
-    p_list.add_argument("--user-type", choices=["student", "admin"], help="按类型筛选")
-    p_list.add_argument("--status", choices=["online", "offline"], help="按状态筛选")
-    p_list.add_argument("--keyword", help="按姓名/用户名模糊筛选")
-    p_list.add_argument("--limit", type=int, default=200, help="限制返回数量，默认 200")
-    p_list.add_argument("--all", action="store_true", help="返回全部，不受 --limit 限制")
-    p_list.add_argument("--json", action="store_true", help="以 JSON 输出")
+    p_list = sub.add_parser("list", help="鍒楀嚭璐︽埛")
+    p_list.add_argument("--user-type", choices=["student", "admin"], help="鎸夌被鍨嬬瓫閫?)
+    p_list.add_argument("--status", choices=["online", "offline"], help="鎸夌姸鎬佺瓫閫?)
+    p_list.add_argument("--keyword", help="鎸夊鍚?鐢ㄦ埛鍚嶆ā绯婄瓫閫?)
+    p_list.add_argument("--limit", type=int, default=200, help="闄愬埗杩斿洖鏁伴噺锛岄粯璁?200")
+    p_list.add_argument("--all", action="store_true", help="杩斿洖鍏ㄩ儴锛屼笉鍙?--limit 闄愬埗")
+    p_list.add_argument("--json", action="store_true", help="浠?JSON 杈撳嚭")
     p_list.set_defaults(func=cmd_list)
 
-    p_show = sub.add_parser("show", help="查看账户详情")
+    p_show = sub.add_parser("show", help="鏌ョ湅璐︽埛璇︽儏")
     add_user_selector_arguments(p_show)
-    p_show.add_argument("--json", action="store_true", help="以 JSON 输出")
+    p_show.add_argument("--json", action="store_true", help="浠?JSON 杈撳嚭")
     p_show.set_defaults(func=cmd_show)
 
-    p_create = sub.add_parser("create", help="创建账户")
-    p_create.add_argument("--name", required=True, help="姓名")
-    p_create.add_argument("--username", required=True, help="用户名")
-    p_create.add_argument("--user-type", choices=["student", "admin"], default="student", help="账户类型")
-    p_create.add_argument("--status", choices=["online", "offline"], default="offline", help="初始状态")
-    p_create.add_argument("--password", help="明文密码")
-    p_create.add_argument("--password-sha256", help="sha256 摘要（64位或 sha256: 前缀）")
-    p_create.add_argument("--force-change", action="store_true", default=False, help="下次登录强制改密")
-    p_create.add_argument("--json", action="store_true", help="以 JSON 输出")
+    p_create = sub.add_parser("create", help="鍒涘缓璐︽埛")
+    p_create.add_argument("--name", required=True, help="濮撳悕")
+    p_create.add_argument("--username", required=True, help="鐢ㄦ埛鍚?)
+    p_create.add_argument("--user-type", choices=["student", "admin"], default="student", help="璐︽埛绫诲瀷")
+    p_create.add_argument("--status", choices=["online", "offline"], default="offline", help="鍒濆鐘舵€?)
+    p_create.add_argument("--password", help="鏄庢枃瀵嗙爜")
+    p_create.add_argument("--password-sha256", help="sha256 鎽樿锛?4浣嶆垨 sha256: 鍓嶇紑锛?)
+    p_create.add_argument("--force-change", action="store_true", default=False, help="涓嬫鐧诲綍寮哄埗鏀瑰瘑")
+    p_create.add_argument("--json", action="store_true", help="浠?JSON 杈撳嚭")
     p_create.set_defaults(func=cmd_create)
 
-    p_update = sub.add_parser("update", help="更新账户资料")
+    p_update = sub.add_parser("update", help="鏇存柊璐︽埛璧勬枡")
     add_user_selector_arguments(p_update)
-    p_update.add_argument("--name", help="修改姓名")
-    p_update.add_argument("--username-new", help="修改用户名")
-    p_update.add_argument("--status", choices=["online", "offline"], help="修改状态")
-    p_update.add_argument("--user-type", choices=["student", "admin"], help="修改类型")
-    p_update.add_argument("--force-change", dest="force_change", action="store_true", help="设置下次登录强制改密")
-    p_update.add_argument("--clear-force-change", dest="force_change", action="store_false", help="取消下次登录强制改密")
-    p_update.add_argument("--unlock", action="store_true", help="同时解锁该账户")
-    p_update.add_argument("--json", action="store_true", help="以 JSON 输出")
+    p_update.add_argument("--name", help="淇敼濮撳悕")
+    p_update.add_argument("--username-new", help="淇敼鐢ㄦ埛鍚?)
+    p_update.add_argument("--status", choices=["online", "offline"], help="淇敼鐘舵€?)
+    p_update.add_argument("--user-type", choices=["student", "admin"], help="淇敼绫诲瀷")
+    p_update.add_argument("--force-change", dest="force_change", action="store_true", help="璁剧疆涓嬫鐧诲綍寮哄埗鏀瑰瘑")
+    p_update.add_argument("--clear-force-change", dest="force_change", action="store_false", help="鍙栨秷涓嬫鐧诲綍寮哄埗鏀瑰瘑")
+    p_update.add_argument("--unlock", action="store_true", help="鍚屾椂瑙ｉ攣璇ヨ处鎴?)
+    p_update.add_argument("--json", action="store_true", help="浠?JSON 杈撳嚭")
     p_update.set_defaults(func=cmd_update, force_change=None)
 
 
 
-    p_reset = sub.add_parser("reset-password", help="重置密码")
+    p_reset = sub.add_parser("reset-password", help="閲嶇疆瀵嗙爜")
     add_user_selector_arguments(p_reset)
-    p_reset.add_argument("--password", help="明文密码")
-    p_reset.add_argument("--password-sha256", help="sha256 摘要（64位或 sha256: 前缀）")
-    p_reset.add_argument("--force-change", dest="force_change", action="store_true", help="下次登录强制改密")
-    p_reset.add_argument("--clear-force-change", dest="force_change", action="store_false", help="取消下次登录强制改密")
-    p_reset.add_argument("--json", action="store_true", help="以 JSON 输出")
+    p_reset.add_argument("--password", help="鏄庢枃瀵嗙爜")
+    p_reset.add_argument("--password-sha256", help="sha256 鎽樿锛?4浣嶆垨 sha256: 鍓嶇紑锛?)
+    p_reset.add_argument("--force-change", dest="force_change", action="store_true", help="涓嬫鐧诲綍寮哄埗鏀瑰瘑")
+    p_reset.add_argument("--clear-force-change", dest="force_change", action="store_false", help="鍙栨秷涓嬫鐧诲綍寮哄埗鏀瑰瘑")
+    p_reset.add_argument("--json", action="store_true", help="浠?JSON 杈撳嚭")
     p_reset.set_defaults(func=cmd_reset_password, force_change=None)
 
-    p_unlock = sub.add_parser("unlock", help="解锁账户（清空失败次数和锁定时间）")
+    p_unlock = sub.add_parser("unlock", help="瑙ｉ攣璐︽埛锛堟竻绌哄け璐ユ鏁板拰閿佸畾鏃堕棿锛?)
     add_user_selector_arguments(p_unlock)
-    p_unlock.add_argument("--json", action="store_true", help="以 JSON 输出")
+    p_unlock.add_argument("--json", action="store_true", help="浠?JSON 杈撳嚭")
     p_unlock.set_defaults(func=cmd_unlock)
 
-    p_delete = sub.add_parser("delete", help="删除账户")
+    p_delete = sub.add_parser("delete", help="鍒犻櫎璐︽埛")
     add_user_selector_arguments(p_delete)
-    p_delete.add_argument("--keep-routes", action="store_true", help="仅删除账户，保留其路线")
-    p_delete.add_argument("--json", action="store_true", help="以 JSON 输出")
+    p_delete.add_argument("--keep-routes", action="store_true", help="浠呭垹闄よ处鎴凤紝淇濈暀鍏惰矾绾?)
+    p_delete.add_argument("--json", action="store_true", help="浠?JSON 杈撳嚭")
     p_delete.set_defaults(func=cmd_delete)
 
-    p_stats = sub.add_parser("stats", help="账户统计")
-    p_stats.add_argument("--json", action="store_true", help="以 JSON 输出")
+    p_stats = sub.add_parser("stats", help="璐︽埛缁熻")
+    p_stats.add_argument("--json", action="store_true", help="浠?JSON 杈撳嚭")
     p_stats.set_defaults(func=cmd_stats)
 
-    p_schema = sub.add_parser("reset-schema", help="重建数据库结构并清空旧数据")
+    p_schema = sub.add_parser("reset-schema", help="閲嶅缓鏁版嵁搴撶粨鏋勫苟娓呯┖鏃ф暟鎹?)
     p_schema.set_defaults(func=cmd_reset_schema)
 
     return parser
@@ -728,3 +732,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

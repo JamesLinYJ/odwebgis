@@ -1,4 +1,99 @@
 (function () {
+    const THEME_STORAGE_KEY = "webgis_theme";
+
+    function normalizeThemePref(theme) {
+        const raw = String(theme || "").trim().toLowerCase();
+        if (raw === "light" || raw === "dark" || raw === "auto") return raw;
+        return "auto";
+    }
+
+    function prefersDarkTheme() {
+        try {
+            return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        } catch {
+            return false;
+        }
+    }
+
+    function getThemePreference() {
+        try {
+            return normalizeThemePref(localStorage.getItem(THEME_STORAGE_KEY));
+        } catch {
+            return "auto";
+        }
+    }
+
+    function resolveAppliedTheme(pref) {
+        const normalized = normalizeThemePref(pref);
+        if (normalized === "auto") {
+            return prefersDarkTheme() ? "dark" : "light";
+        }
+        return normalized;
+    }
+
+    function applyTheme(pref) {
+        const applied = resolveAppliedTheme(pref);
+        const isDark = applied === "dark";
+        const root = document.documentElement;
+        const body = document.body;
+        if (root) {
+            root.classList.toggle("theme-dark", isDark);
+            root.dataset.theme = applied;
+        }
+        if (body) {
+            body.classList.toggle("theme-dark", isDark);
+            body.dataset.theme = applied;
+        }
+        try {
+            window.dispatchEvent(new CustomEvent("webgis-theme-change", {
+                detail: { theme: applied, preference: normalizeThemePref(pref) },
+            }));
+        } catch {
+            // ignore
+        }
+        return applied;
+    }
+
+    function setTheme(pref) {
+        const normalized = normalizeThemePref(pref);
+        try {
+            localStorage.setItem(THEME_STORAGE_KEY, normalized);
+        } catch {
+            // ignore storage failure
+        }
+        return applyTheme(normalized);
+    }
+
+    function toggleTheme() {
+        const applied = resolveAppliedTheme(getThemePreference());
+        const nextPref = applied === "dark" ? "light" : "dark";
+        return setTheme(nextPref);
+    }
+
+    function initTheme() {
+        const pref = getThemePreference();
+        applyTheme(pref);
+        try {
+            if (window.matchMedia) {
+                const media = window.matchMedia("(prefers-color-scheme: dark)");
+                const onChange = () => {
+                    if (getThemePreference() === "auto") {
+                        applyTheme("auto");
+                    }
+                };
+                if (typeof media.addEventListener === "function") {
+                    media.addEventListener("change", onChange);
+                } else if (typeof media.addListener === "function") {
+                    media.addListener(onChange);
+                }
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    initTheme();
+
     const SHA256_K = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
         0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -335,5 +430,10 @@
         fmtNumber,
         fmtTime,
         notify,
+        getThemePreference,
+        getTheme: resolveAppliedTheme,
+        setTheme,
+        toggleTheme,
+        applyTheme,
     };
 })();

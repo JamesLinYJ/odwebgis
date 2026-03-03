@@ -1,4 +1,8 @@
-﻿import csv
+﻿# 【中文注释】
+# 文件说明：app.py 为项目自研源码文件，包含核心业务逻辑。
+# 维护约定：变更前先确认输入输出与调用链，避免影响前后端联调。
+
+import csv
 import gzip as gzip_mod
 import io
 import os
@@ -1908,3 +1912,4 @@ if __name__ == "__main__":
     except ValueError:
         port = 5000
     app.run(host=host, port=port, debug=False)
+

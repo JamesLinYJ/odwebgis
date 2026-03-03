@@ -1,4 +1,9 @@
-﻿
+﻿/* 【中文注释】
+ * 文件说明：explorer-react.jsx 为前端 React 页面源码，承载主要交互逻辑。
+ * 维护约定：组件状态变更需同步检查地图与表单交互。
+ */
+
+
 const { useEffect, useMemo, useRef, useState } = React;
 
 function buildCurve(start, end, segments = 40) {
@@ -105,6 +110,7 @@ function attachMapDecorControls(map) {
 }
 
 function normalizeCoordText(raw) {
+  // Normalize symbols and unit characters to support mixed input styles.
   return String(raw || "")
     .trim()
     .replace(/，/g, ",")
@@ -119,6 +125,7 @@ function normalizeCoordText(raw) {
 }
 
 function parseFlexibleCoordinate(raw, axis) {
+  // Accept decimal and DMS-like text, then normalize to decimal degree.
   const label = axis === "lat" ? "纬度" : "经度";
   let text = normalizeCoordText(raw).toUpperCase();
   if (!text) throw new Error(`${label}不能为空`);
@@ -158,6 +165,7 @@ function parseFlexibleCoordinate(raw, axis) {
 }
 
 function toDmsParts(value, axis) {
+  // Convert decimal coordinate to DMS split fields for the form.
   const abs = Math.abs(Number(value) || 0);
   let deg = Math.floor(abs);
   let minFloat = (abs - deg) * 60;
@@ -176,6 +184,7 @@ function toDmsParts(value, axis) {
 }
 
 function parseDmsParts(parts, axis, prefix = "") {
+  // Parse DMS split fields and return decimal degree.
   const label = `${prefix}${axis === "lat" ? "纬度" : "经度"}`;
   const degText = String(parts.deg || "").trim();
   const minText = String(parts.min || "").trim();
@@ -277,7 +286,7 @@ function createEndpointState() {
 }
 
 function formatCoord(lat, lon) {
-  return `${Number(lat).toFixed(6)}, ${Number(lon).toFixed(6)}`;
+  return `${Number(lon).toFixed(6)}, ${Number(lat).toFixed(6)}`;
 }
 function StatCard({ title, value, hint }) {
   return (
@@ -328,20 +337,20 @@ function EndpointEditor({ title, endpoint, setEndpoint, coordMode }) {
 
       <div className={`ios-collapse ${coordMode === "decimal" ? "max-h-[72px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}>
         <div className={`grid grid-cols-2 gap-3 ios-mode-panel ${coordMode === "decimal" ? "ios-mode-panel-show" : "ios-mode-panel-hide"}`}>
-          <input value={endpoint.decimal.lat} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lat: e.target.value } }))} className="modern-input rounded-xl px-3.5 py-2 text-xs" placeholder="纬度" />
           <input value={endpoint.decimal.lon} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lon: e.target.value } }))} className="modern-input rounded-xl px-3.5 py-2 text-xs" placeholder="经度" />
+          <input value={endpoint.decimal.lat} onChange={(e) => setEndpoint((p) => ({ ...p, decimal: { ...p.decimal, lat: e.target.value } }))} className="modern-input rounded-xl px-3.5 py-2 text-xs" placeholder="纬度" />
         </div>
       </div>
 
       <div className={`ios-collapse ${coordMode === "dms" ? "mt-2 max-h-[166px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"}`}>
         <div className={`space-y-3 ios-mode-panel ${coordMode === "dms" ? "ios-mode-panel-show" : "ios-mode-panel-hide"}`}>
           <div>
-            <div className="mb-2 text-xs font-bold text-slate-500">纬度（度/分/秒）</div>
-            <DmsAxisInput axis="lat" value={endpoint.dms.lat} onChange={(next) => setEndpoint((p) => ({ ...p, dms: { ...p.dms, lat: next } }))} />
-          </div>
-          <div>
             <div className="mb-2 text-xs font-bold text-slate-500">经度（度/分/秒）</div>
             <DmsAxisInput axis="lon" value={endpoint.dms.lon} onChange={(next) => setEndpoint((p) => ({ ...p, dms: { ...p.dms, lon: next } }))} />
+          </div>
+          <div>
+            <div className="mb-2 text-xs font-bold text-slate-500">纬度（度/分/秒）</div>
+            <DmsAxisInput axis="lat" value={endpoint.dms.lat} onChange={(next) => setEndpoint((p) => ({ ...p, dms: { ...p.dms, lat: next } }))} />
           </div>
         </div>
       </div>
@@ -384,6 +393,7 @@ function ExplorerApp() {
   const [mapFullscreen, setMapFullscreen] = useState(false);
   const [baseMapMode, setBaseMapMode] = useState("vector");
   const [isCompactScreen, setIsCompactScreen] = useState(false);
+  const [themeMode, setThemeMode] = useState(api.getTheme(api.getThemePreference()));
   const layoutAutoInitRef = useRef(false);
 
   const categoryColors = useMemo(() => ({ 课堂: "#2563eb", 通勤: "#0891b2", 调研: "#7c3aed", 实习: "#f97316", 其他: "#4b5563" }), []);
@@ -427,6 +437,14 @@ function ExplorerApp() {
     () => campusShortcuts.find((item) => item.key === selectedCampusKey) || campusShortcuts[0] || null,
     [campusShortcuts, selectedCampusKey]
   );
+
+  useEffect(() => {
+    const onThemeChange = (event) => {
+      setThemeMode(event?.detail?.theme || api.getTheme(api.getThemePreference()));
+    };
+    window.addEventListener("webgis-theme-change", onThemeChange);
+    return () => window.removeEventListener("webgis-theme-change", onThemeChange);
+  }, []);
 
   function syncEndpointFromDecimal(kind, lat, lon, fallbackName) {
     const lat6 = Number(lat.toFixed(6));
@@ -475,6 +493,7 @@ function ExplorerApp() {
   }
 
   function convertEndpointInputSystem(endpoint, fromSystem, toSystem, prefix) {
+    // Keep user-entered endpoint values consistent when switching coordinate system tabs.
     try {
       const raw = parseEndpointRaw(endpoint, prefix);
       const [wgsLat, wgsLon] = convertToWgs84(raw.lat, raw.lon, fromSystem);
@@ -635,6 +654,7 @@ function ExplorerApp() {
 
   useEffect(() => {
     if (!mapRef.current) return;
+    // Map click updates O/D according to the active pick target.
     const onMapClick = (e) => {
       if (!pickTarget) return;
       const { lat, lng } = e.latlng;
@@ -720,6 +740,9 @@ function ExplorerApp() {
   }
 
   function generateOdMap() {
+    // Priority:
+    // 1) If O/D inputs are complete, fit map to that pair.
+    // 2) Otherwise, fit to currently visible route set.
     try {
       const origin = parseEndpointIfFilled(originInput, "起点");
       const destination = parseEndpointIfFilled(destinationInput, "终点");
@@ -767,6 +790,7 @@ function ExplorerApp() {
   }
 
   function syncInputPointsToMap() {
+    // Parse whatever is currently filled in the form and center/fit the map.
     try {
       const origin = parseEndpointIfFilled(originInput, "起点");
       const destination = parseEndpointIfFilled(destinationInput, "终点");
@@ -863,6 +887,12 @@ function ExplorerApp() {
     }
     window.location.href = "/auth";
   }
+
+  function toggleThemeMode() {
+    const next = api.toggleTheme();
+    setThemeMode(next);
+  }
+
   return (
     <div className="relative mx-auto max-w-[1880px] p-3 sm:p-4 ios-fade-up">
       <div className="pointer-events-none absolute -left-16 -top-10 h-36 w-36 rounded-full bg-cyan-200/35 blur-3xl" />
@@ -877,8 +907,9 @@ function ExplorerApp() {
           <div className="w-full sm:w-auto">
             <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:justify-end sm:overflow-visible sm:pb-0">
               <button onClick={() => Promise.all([loadMe(), loadRoutes()])} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 sm:text-sm">刷新</button>
-              <button onClick={generateOdMap} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 sm:text-sm">更新地图展示</button>
+              <button onClick={generateOdMap} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 sm:text-sm">按当前数据定位地图</button>
               <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 sm:text-sm">账户中心</button>
+              <button onClick={toggleThemeMode} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50 sm:text-sm">{themeMode === "dark" ? "浅色模式" : "深色模式"}</button>
               <button onClick={logout} className="shrink-0 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-bold text-rose-600 transition-all hover:bg-rose-50 sm:text-sm">退出登录</button>
             </div>
           </div>
@@ -905,15 +936,27 @@ function ExplorerApp() {
             <div className="mt-1.5 text-[11px] font-semibold text-slate-600 leading-tight">
               {pickTarget === "origin" && "正在点选起点 O"}
               {pickTarget === "destination" && "正在点选终点 D"}
-              {!pickTarget && "可通过地图点选或右侧表单录入 O/D"}
+              {!pickTarget && "可通过左下角按钮点选，或在右侧表单录入 O/D"}
             </div>
             <div className="mt-1.5 grid grid-cols-2 gap-x-2 text-[10px] font-semibold text-slate-500 leading-tight">
               <div>O: {originPoint ? formatCoord(originPoint[0], originPoint[1]) : "未设置"}</div>
               <div>D: {destinationPoint ? formatCoord(destinationPoint[0], destinationPoint[1]) : "未设置"}</div>
             </div>
             <div className="mt-2 grid grid-cols-3 gap-1.5">
-              <button type="button" onClick={() => setPickTarget("origin")} className={`rounded-lg px-2 py-1 text-[10px] font-bold transition-all ${pickTarget === "origin" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选 O</button>
-              <button type="button" onClick={() => setPickTarget("destination")} className={`rounded-lg px-2 py-1 text-[10px] font-bold transition-all ${pickTarget === "destination" ? "bg-brand-600 text-white" : "border border-blue-200 bg-white text-brand-700"}`}>点选 D</button>
+              <button
+                type="button"
+                onClick={() => { setActiveEndpoint("origin"); setPickTarget("origin"); }}
+                className={`rounded-lg border px-2 py-1 text-[10px] font-bold transition-all ${pickTarget === "origin" ? "border-blue-300 bg-blue-100 text-brand-700 shadow-sm" : "border-blue-200 bg-white text-brand-700"}`}
+              >
+                点选 O
+              </button>
+              <button
+                type="button"
+                onClick={() => { setActiveEndpoint("destination"); setPickTarget("destination"); }}
+                className={`rounded-lg border px-2 py-1 text-[10px] font-bold transition-all ${pickTarget === "destination" ? "border-blue-300 bg-blue-100 text-brand-700 shadow-sm" : "border-blue-200 bg-white text-brand-700"}`}
+              >
+                点选 D
+              </button>
               <button type="button" onClick={clearInputs} className="rounded-lg border border-blue-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 transition-all">清空</button>
             </div>
           </div>
@@ -994,31 +1037,8 @@ function ExplorerApp() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveEndpoint("origin");
-                        setPickTarget("origin");
-                      }}
-                      className={`rounded-xl px-3 py-2 text-xs font-bold transition-all ${pickTarget === "origin" ? "bg-brand-600 text-white shadow-md shadow-brand-500/30" : "border border-blue-200 bg-white text-brand-700 hover:bg-slate-50"}`}
-                    >
-                      点选起点 O
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveEndpoint("destination");
-                        setPickTarget("destination");
-                      }}
-                      className={`rounded-xl px-3 py-2 text-xs font-bold transition-all ${pickTarget === "destination" ? "bg-brand-600 text-white shadow-md shadow-brand-500/30" : "border border-blue-200 bg-white text-brand-700 hover:bg-slate-50"}`}
-                    >
-                      点选终点 D
-                    </button>
-                  </div>
-
                   <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
-                    <button type="button" onClick={syncInputPointsToMap} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">输入同步地图</button>
+                    <button type="button" onClick={syncInputPointsToMap} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">按输入定位地图</button>
                     <button type="button" onClick={swapEndpoints} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">交换 O/D</button>
                     <button type="button" onClick={clearInputs} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">清空输入</button>
                   </div>
@@ -1056,7 +1076,7 @@ function ExplorerApp() {
                       {allCategories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                     </select>
                     <button disabled={submitting} className="btn-primary rounded-xl px-3.5 py-2 text-xs font-bold disabled:opacity-60">{submitting ? "提交中..." : "保存线路"}</button>
-                    <button type="button" onClick={generateOdMap} className="col-span-2 rounded-xl border border-blue-200 bg-white px-3.5 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">更新地图展示</button>
+                    <button type="button" onClick={generateOdMap} className="col-span-2 rounded-xl border border-blue-200 bg-white px-3.5 py-2 text-xs font-bold text-brand-700 transition-all hover:bg-slate-50">预览当前线路</button>
                   </div>
 
                   <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-2 py-2 text-[11px] font-semibold text-slate-600">
@@ -1113,3 +1133,4 @@ if (ReactDOM.createRoot) {
 } else {
   ReactDOM.render(<ExplorerApp />, explorerRootNode);
 }
+

@@ -1,4 +1,9 @@
-﻿const { useEffect, useMemo, useRef, useState } = React;
+﻿/* 【中文注释】
+ * 文件说明：admin-react.jsx 为前端 React 页面源码，承载主要交互逻辑。
+ * 维护约定：组件状态变更需同步检查地图与表单交互。
+ */
+
+const { useEffect, useMemo, useRef, useState } = React;
 
 function buildCurve(start, end, segments = 40) {
     const [lat1, lon1] = start;
@@ -153,6 +158,7 @@ function AdminApp() {
     const [mapFullscreen, setMapFullscreen] = useState(false);
     const [exportingPoster, setExportingPoster] = useState(false);
     const [isCompactScreen, setIsCompactScreen] = useState(false);
+    const [themeMode, setThemeMode] = useState(api.getTheme(api.getThemePreference()));
     const [filterPanelOpen, setFilterPanelOpen] = useState(true);
     const layoutAutoInitRef = useRef(false);
     const [accountPanelOpen, setAccountPanelOpen] = useState(true);
@@ -407,6 +413,14 @@ function AdminApp() {
         }, 250);
         return () => clearTimeout(timer);
     }, [filters]);
+
+    useEffect(() => {
+        const onThemeChange = (event) => {
+            setThemeMode(event?.detail?.theme || api.getTheme(api.getThemePreference()));
+        };
+        window.addEventListener("webgis-theme-change", onThemeChange);
+        return () => window.removeEventListener("webgis-theme-change", onThemeChange);
+    }, []);
 
     useEffect(() => {
         if (!selectedUserId) {
@@ -1138,6 +1152,11 @@ function AdminApp() {
         window.location.href = "/auth";
     }
 
+    function toggleThemeMode() {
+        const next = api.toggleTheme();
+        setThemeMode(next);
+    }
+
     const topCategoryText = categories
         .slice(0, 3)
         .map((item) => `${item.category}:${api.fmtNumber(item.count)}条`)
@@ -1165,6 +1184,7 @@ function AdminApp() {
                             <button onClick={() => window.location.href = "/admin/accounts"} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">账户管理</button>
                             <button onClick={() => window.location.href = "/account"} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">账户中心</button>
                             <a href="/api/export/users-csv" className="btn-primary shrink-0 rounded-xl bg-admin-600 px-4 py-2.5 text-sm font-bold text-white transition-all">导出学生 CSV</a>
+                            <button onClick={toggleThemeMode} className="shrink-0 rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50">{themeMode === "dark" ? "浅色模式" : "深色模式"}</button>
                             <button onClick={logout} className="shrink-0 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-bold text-rose-600 transition-all hover:bg-rose-50">退出登录</button>
                         </div>
                     </div>
@@ -1668,3 +1688,4 @@ if (ReactDOM.createRoot) {
 } else {
     ReactDOM.render(<AdminApp />, adminRootNode);
 }
+

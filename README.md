@@ -31,7 +31,7 @@
 pip install -r requirements.txt
 ```
 
-## 3. 启动
+## 3. 启动（统一脚本）
 
 先配置天地图 Key（推荐环境变量）：
 
@@ -42,7 +42,7 @@ $env:TIANDITU_API_KEY="你的天地图Key"
 也可在项目根目录写入 `./.tianditu_key`（文件内容仅一行 key）。
 
 ```bash
-python app.py
+python webgisctl.py start --open
 ```
 
 默认地址：`http://127.0.0.1:5000`
@@ -68,16 +68,20 @@ Windows 可用：
 manage_map_key.bat set --key "你的天地图Key"
 ```
 
-Linux 可用：
+Shell 可用：
 
 ```bash
 ./manage_map_key.sh set --key "你的天地图Key"
 ```
 
-一键自动启动、自动打开页面并调试：
+常用命令（Windows / Linux / WSL 一致）：
 
 ```bash
-python run_local.py
+python webgisctl.py setup
+python webgisctl.py build
+python webgisctl.py restart --open
+python webgisctl.py check
+python webgisctl.py stop
 ```
 
 ## 4. 系统后台管理账号与默认管理员
@@ -85,7 +89,7 @@ python run_local.py
 - 系统后台账号（可选）仍支持环境变量：
   - `WEBGIS_SYSTEM_ADMIN_ACCOUNT`
   - `WEBGIS_SYSTEM_ADMIN_PASSWORD` 或 `WEBGIS_SYSTEM_ADMIN_PASSWORD_SHA256`
-- Linux 一键部署脚本会自动创建一个默认管理员网页账号（可自定义用户名和密码）。
+- 统一部署脚本会自动创建一个默认管理员网页账号（可自定义用户名和密码）。
 - 如未手动指定默认管理员密码，部署脚本会自动生成并在终端输出一次。
 - 当前数据库结构使用 `users.username` 作为唯一登录名，已不再使用 `student_no`。
 
@@ -166,25 +170,24 @@ manage_accounts.bat list
 tools/tailwindcss.exe -i static/css/tailwind.input.css -o static/css/tailwind.generated.css --minify
 ```
 
-Linux 下可直接使用：
+也可使用同名脚本入口：
 
 ```bash
-./build_tailwind.sh
+./webgis_build.sh
 ```
 
-## 10. Linux 一键脚本
+## 10. 一键部署（统一）
 
-完整傻瓜式一键部署（安装依赖、编译 Tailwind、配置 Key、启动服务、创建默认管理员）：
+完整一键部署（安装依赖、编译 Tailwind、配置 Key、启动服务、创建默认管理员）：
 
 ```bash
-chmod +x deploy_linux_oneclick.sh setup_linux.sh start_linux.sh cleanup_linux.sh uninstall_linux.sh manage_map_key.sh
-./deploy_linux_oneclick.sh --map-key "你的天地图Key"
+python webgisctl.py deploy --map-key "你的天地图Key"
 ```
 
 可选参数：
 
 ```bash
-./deploy_linux_oneclick.sh \
+python webgisctl.py deploy \
   --map-key "你的天地图Key" \
   --host 0.0.0.0 \
   --port 5000 \
@@ -192,22 +195,17 @@ chmod +x deploy_linux_oneclick.sh setup_linux.sh start_linux.sh cleanup_linux.sh
   --admin-password "Your#Admin#Pass123!"
 ```
 
-仅启动（已安装依赖后）：
+清理：
 
 ```bash
-./start_linux.sh
+python webgisctl.py clean runtime
+python webgisctl.py clean all
 ```
 
-一键清理：
-
-```bash
-./cleanup_linux.sh runtime   # 停进程 + 清日志/缓存
-./cleanup_linux.sh all       # 额外清理 .venv / webgis.db / .tianditu_key / .env.webgis
-```
-
-卸载：
-
-```bash
-./uninstall_linux.sh
-./uninstall_linux.sh --all --yes
-```
+同名脚本入口（`.sh` / `.bat`）：
+- `webgis_setup`
+- `webgis_build`
+- `webgis_start`
+- `webgis_deploy`
+- `webgis_clean`
+- `webgis_uninstall`

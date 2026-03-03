@@ -28,6 +28,7 @@ function PasswordStrengthBar({ password, username = "" }) {
 function AdminAccountsApp() {
     const [loading, setLoading] = useState(true);
     const [accounts, setAccounts] = useState([]);
+    const [themeMode, setThemeMode] = useState(api.getTheme(api.getThemePreference()));
     const [filter, setFilter] = useState({ q: "", user_type: "all" });
     const [form, setForm] = useState({
         name: "",
@@ -94,6 +95,14 @@ function AdminAccountsApp() {
 
     useEffect(() => {
         bootstrap();
+    }, []);
+
+    useEffect(() => {
+        const onThemeChange = (event) => {
+            setThemeMode(event?.detail?.theme || api.getTheme(api.getThemePreference()));
+        };
+        window.addEventListener("webgis-theme-change", onThemeChange);
+        return () => window.removeEventListener("webgis-theme-change", onThemeChange);
     }, []);
 
     useEffect(() => {
@@ -209,6 +218,11 @@ function AdminAccountsApp() {
         window.location.href = "/auth";
     }
 
+    function toggleThemeMode() {
+        const next = api.toggleTheme();
+        setThemeMode(next);
+    }
+
     return (
         <div className="mx-auto max-w-[1400px] p-2.5 sm:p-5 ios-fade-up">
             <header className="ios-card mb-5 rounded-[1.4rem] border border-blue-100 bg-white/80 px-4 py-4 shadow-soft sm:rounded-[2rem] sm:px-6 sm:py-5">
@@ -231,6 +245,13 @@ function AdminAccountsApp() {
                             className="rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50"
                         >
                             我的账户
+                        </button>
+                        <button
+                            type="button"
+                            onClick={toggleThemeMode}
+                            className="rounded-xl border border-admin-200 bg-white px-4 py-2.5 text-sm font-bold text-admin-600 transition-all hover:bg-admin-50"
+                        >
+                            {themeMode === "dark" ? "浅色模式" : "深色模式"}
                         </button>
                         <button
                             type="button"

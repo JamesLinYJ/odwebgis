@@ -1,3 +1,9 @@
-﻿@tailwind base;
+﻿/* 【中文注释】
+ * 文件说明：tailwind.input.css 为平台样式文件，用于统一视觉与动效。
+ * 维护约定：调整样式变量时注意桌面端与移动端一致性。
+ */
+
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
+

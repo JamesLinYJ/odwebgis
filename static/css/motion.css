@@ -1,3 +1,8 @@
+﻿/* 【中文注释】
+ * 文件说明：motion.css 为平台样式文件，用于统一视觉与动效。
+ * 维护约定：调整样式变量时注意桌面端与移动端一致性。
+ */
+
 :root {
     --w11-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
     --w11-ease-out: cubic-bezier(0.2, 0.9, 0.2, 1);
@@ -32,6 +37,14 @@ body {
     color: #0f172a;
 }
 
+/* 深色主题：全局基色 */
+html.theme-dark body,
+body.theme-dark {
+    color: #e2e8f0 !important;
+    background: radial-gradient(circle at 15% 12%, #1c2536 0%, #0f172a 52%, #0a101d 100%) !important;
+    background-color: #0f172a !important;
+}
+
 body::before,
 body::after {
     content: "";
@@ -61,6 +74,18 @@ body::after {
     animation: winOrbB 18s var(--w11-ease-out) infinite;
 }
 
+html.theme-dark body::before,
+body.theme-dark::before {
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.2) 0%, rgba(56, 189, 248, 0) 68%);
+    opacity: 0.2;
+}
+
+html.theme-dark body::after,
+body.theme-dark::after {
+    background: radial-gradient(circle, rgba(96, 165, 250, 0.22) 0%, rgba(96, 165, 250, 0) 70%);
+    opacity: 0.18;
+}
+
 .ios-card {
     background: var(--w11-glass-bg);
     border: 1px solid var(--w11-glass-border);
@@ -73,6 +98,13 @@ body::after {
         border-color var(--w11-normal) var(--w11-ease),
         opacity var(--w11-normal) var(--w11-ease);
     will-change: transform, box-shadow, opacity;
+}
+
+html.theme-dark .ios-card,
+body.theme-dark .ios-card {
+    background: rgba(15, 23, 42, 0.7);
+    border-color: rgba(71, 85, 105, 0.65);
+    box-shadow: 0 16px 36px rgba(2, 6, 23, 0.5);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -144,6 +176,25 @@ a:focus-visible {
     background: #ffffff !important;
     border-color: #3b82f6 !important;
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2), inset 0 1px 2px rgba(15, 23, 42, 0.02) !important;
+}
+
+html.theme-dark .modern-input,
+body.theme-dark .modern-input {
+    background: rgba(15, 23, 42, 0.78) !important;
+    color: #e2e8f0 !important;
+    border-color: rgba(71, 85, 105, 0.75) !important;
+    box-shadow: inset 0 1px 2px rgba(2, 6, 23, 0.6) !important;
+}
+
+html.theme-dark .modern-input::placeholder,
+body.theme-dark .modern-input::placeholder {
+    color: #94a3b8 !important;
+}
+
+html.theme-dark .modern-input:focus,
+body.theme-dark .modern-input:focus {
+    border-color: #60a5fa !important;
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.24), inset 0 1px 2px rgba(2, 6, 23, 0.75) !important;
 }
 
 .safe-pb {
@@ -249,7 +300,31 @@ a:focus-visible {
     background: rgba(239, 246, 255, 0.96) !important;
 }
 
-/* ── Unified map decoration controls (compass + scale) ── */
+html.theme-dark .leaflet-bar,
+html.theme-dark .leaflet-control-zoom,
+body.theme-dark .leaflet-bar,
+body.theme-dark .leaflet-control-zoom {
+    border-color: rgba(71, 85, 105, 0.95) !important;
+    box-shadow: 0 10px 20px rgba(2, 6, 23, 0.45);
+}
+
+html.theme-dark .leaflet-bar a,
+html.theme-dark .leaflet-control-zoom a,
+body.theme-dark .leaflet-bar a,
+body.theme-dark .leaflet-control-zoom a {
+    background: rgba(15, 23, 42, 0.92) !important;
+    color: #93c5fd !important;
+    border-bottom-color: rgba(71, 85, 105, 0.9) !important;
+}
+
+html.theme-dark .leaflet-bar a:hover,
+html.theme-dark .leaflet-control-zoom a:hover,
+body.theme-dark .leaflet-bar a:hover,
+body.theme-dark .leaflet-control-zoom a:hover {
+    background: rgba(30, 41, 59, 0.95) !important;
+}
+
+/* 鈹€鈹€ Unified map decoration controls (compass + scale) 鈹€鈹€ */
 .leaflet-bottom.leaflet-right {
     margin-right: max(4px, env(safe-area-inset-right)) !important;
     margin-bottom: calc(6px + env(safe-area-inset-bottom)) !important;
@@ -351,6 +426,173 @@ a:focus-visible {
     letter-spacing: 0.02em;
     white-space: nowrap;
     line-height: 1;
+}
+
+html.theme-dark .map-compass,
+body.theme-dark .map-compass {
+    border-color: rgba(71, 85, 105, 0.9);
+    background: rgba(15, 23, 42, 0.9);
+    box-shadow: 0 8px 20px rgba(2, 6, 23, 0.42);
+}
+
+html.theme-dark .map-scale-bar .scale-line,
+body.theme-dark .map-scale-bar .scale-line {
+    background: linear-gradient(90deg, #93c5fd 0%, #60a5fa 100%);
+}
+
+html.theme-dark .map-scale-bar .scale-line::before,
+html.theme-dark .map-scale-bar .scale-line::after,
+body.theme-dark .map-scale-bar .scale-line::before,
+body.theme-dark .map-scale-bar .scale-line::after {
+    background: #93c5fd;
+}
+
+html.theme-dark .map-scale-bar .scale-text,
+body.theme-dark .map-scale-bar .scale-text {
+    color: #bfdbfe;
+    text-shadow: 0 1px 3px rgba(2, 6, 23, 0.95);
+}
+
+html.theme-dark .map-detail-card,
+body.theme-dark .map-detail-card {
+    background: rgba(15, 23, 42, 0.72) !important;
+    border-color: rgba(71, 85, 105, 0.76) !important;
+}
+
+/* 深色主题：常用 Tailwind 语义色覆盖 */
+html.theme-dark .bg-white,
+body.theme-dark .bg-white {
+    background-color: rgba(15, 23, 42, 0.9) !important;
+}
+html.theme-dark .bg-white\/95,
+body.theme-dark .bg-white\/95 {
+    background-color: rgba(15, 23, 42, 0.86) !important;
+}
+html.theme-dark .bg-white\/90,
+body.theme-dark .bg-white\/90 {
+    background-color: rgba(15, 23, 42, 0.8) !important;
+}
+html.theme-dark .bg-white\/92,
+body.theme-dark .bg-white\/92 {
+    background-color: rgba(15, 23, 42, 0.84) !important;
+}
+html.theme-dark .bg-white\/80,
+body.theme-dark .bg-white\/80 {
+    background-color: rgba(15, 23, 42, 0.72) !important;
+}
+html.theme-dark .bg-white\/75,
+body.theme-dark .bg-white\/75 {
+    background-color: rgba(15, 23, 42, 0.68) !important;
+}
+html.theme-dark .bg-white\/70,
+body.theme-dark .bg-white\/70 {
+    background-color: rgba(15, 23, 42, 0.65) !important;
+}
+html.theme-dark .bg-white\/60,
+body.theme-dark .bg-white\/60 {
+    background-color: rgba(15, 23, 42, 0.56) !important;
+}
+html.theme-dark .bg-blue-50,
+body.theme-dark .bg-blue-50 {
+    background-color: rgba(30, 41, 59, 0.78) !important;
+}
+html.theme-dark .bg-blue-50\/40,
+body.theme-dark .bg-blue-50\/40 {
+    background-color: rgba(30, 41, 59, 0.5) !important;
+}
+html.theme-dark .bg-blue-50\/50,
+body.theme-dark .bg-blue-50\/50 {
+    background-color: rgba(30, 41, 59, 0.58) !important;
+}
+html.theme-dark .bg-blue-50\/70,
+body.theme-dark .bg-blue-50\/70 {
+    background-color: rgba(30, 41, 59, 0.72) !important;
+}
+html.theme-dark .bg-blue-100,
+body.theme-dark .bg-blue-100 {
+    background-color: rgba(30, 58, 138, 0.34) !important;
+}
+html.theme-dark .bg-blue-100\/70,
+body.theme-dark .bg-blue-100\/70 {
+    background-color: rgba(30, 58, 138, 0.28) !important;
+}
+html.theme-dark .border-blue-100,
+body.theme-dark .border-blue-100 {
+    border-color: rgba(71, 85, 105, 0.7) !important;
+}
+html.theme-dark .border-blue-100\/80,
+body.theme-dark .border-blue-100\/80 {
+    border-color: rgba(71, 85, 105, 0.76) !important;
+}
+html.theme-dark .border-blue-200,
+body.theme-dark .border-blue-200 {
+    border-color: rgba(100, 116, 139, 0.8) !important;
+}
+html.theme-dark .border-admin-200,
+body.theme-dark .border-admin-200 {
+    border-color: rgba(96, 165, 250, 0.52) !important;
+}
+html.theme-dark .border-admin-300,
+body.theme-dark .border-admin-300 {
+    border-color: rgba(96, 165, 250, 0.66) !important;
+}
+html.theme-dark .text-slate-800,
+body.theme-dark .text-slate-800 {
+    color: #e2e8f0 !important;
+}
+html.theme-dark .text-slate-700,
+body.theme-dark .text-slate-700 {
+    color: #cbd5e1 !important;
+}
+html.theme-dark .text-slate-600,
+body.theme-dark .text-slate-600 {
+    color: #94a3b8 !important;
+}
+html.theme-dark .text-slate-500,
+body.theme-dark .text-slate-500 {
+    color: #94a3b8 !important;
+}
+html.theme-dark .text-slate-400,
+body.theme-dark .text-slate-400 {
+    color: #64748b !important;
+}
+html.theme-dark .text-brand-700,
+body.theme-dark .text-brand-700,
+html.theme-dark .text-admin-600,
+body.theme-dark .text-admin-600 {
+    color: #93c5fd !important;
+}
+html.theme-dark .shadow-soft,
+body.theme-dark .shadow-soft {
+    box-shadow: 0 10px 30px rgba(2, 6, 23, 0.52) !important;
+}
+
+/* 全局主题切换按钮 */
+.global-theme-toggle {
+    position: fixed;
+    top: 14px;
+    right: 14px;
+    z-index: 3200;
+    min-width: 58px;
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(191, 219, 254, 0.9);
+    background: rgba(255, 255, 255, 0.88);
+    color: #1d4ed8;
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: 0 8px 20px rgba(30, 64, 175, 0.16);
+    backdrop-filter: blur(10px) saturate(125%);
+}
+
+html.theme-dark .global-theme-toggle,
+body.theme-dark .global-theme-toggle {
+    border-color: rgba(100, 116, 139, 0.8);
+    background: rgba(15, 23, 42, 0.88);
+    color: #bfdbfe;
+    box-shadow: 0 8px 20px rgba(2, 6, 23, 0.42);
 }
 
 @media (max-width: 640px) {

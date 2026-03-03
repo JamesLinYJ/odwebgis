@@ -1,4 +1,8 @@
-﻿import os
+﻿# 【中文注释】
+# 文件说明：run_local.py 为项目自研源码文件，包含核心业务逻辑。
+# 维护约定：变更前先确认输入输出与调用链，避免影响前后端联调。
+
+import os
 import subprocess
 import sys
 import time
@@ -268,3 +272,4 @@ if __name__ == "__main__":
     debug_checks()
     open_pages()
     print("\n  Done.\n")
+

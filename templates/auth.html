@@ -1,12 +1,26 @@
-﻿<!doctype html>
+<!-- 【中文注释】
+  文件说明：auth.html 为页面模板入口文件。
+  维护约定：修改资源引用时请同步版本号避免缓存问题。
+-->
+
+<!doctype html>
 <html lang="zh-CN">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebGIS 账户入口</title>
+    <script>
+        (function () {
+            try {
+                var pref = localStorage.getItem("webgis_theme") || "auto";
+                var dark = pref === "dark" || (pref !== "light" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+                if (dark) document.documentElement.classList.add("theme-dark");
+            } catch (e) { }
+        })();
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/misans.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/motion.css', v='20260302-mobileaudit') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/motion.css', v='20260303-darkmapfix') }}">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -27,3 +41,4 @@
 </body>
 
 </html>
+

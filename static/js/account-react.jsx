@@ -29,6 +29,7 @@ function AccountApp() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [user, setUser] = useState(null);
+    const [themeMode, setThemeMode] = useState(api.getTheme(api.getThemePreference()));
     const [form, setForm] = useState({
         old_password: "",
         new_password: "",
@@ -53,6 +54,14 @@ function AccountApp() {
 
     useEffect(() => {
         loadMe();
+    }, []);
+
+    useEffect(() => {
+        const onThemeChange = (event) => {
+            setThemeMode(event?.detail?.theme || api.getTheme(api.getThemePreference()));
+        };
+        window.addEventListener("webgis-theme-change", onThemeChange);
+        return () => window.removeEventListener("webgis-theme-change", onThemeChange);
     }, []);
 
     async function submitPassword(e) {
@@ -106,6 +115,11 @@ function AccountApp() {
         window.location.href = user.user_type === "admin" ? "/admin" : "/";
     }
 
+    function toggleThemeMode() {
+        const next = api.toggleTheme();
+        setThemeMode(next);
+    }
+
     return (
         <div className="mx-auto max-w-[860px] p-2.5 sm:p-4 ios-fade-up">
             <header className="ios-card mb-4 rounded-[1.4rem] border border-blue-100 bg-white/80 px-4 py-4 shadow-soft sm:rounded-[2rem] sm:px-6 sm:py-5">
@@ -121,6 +135,13 @@ function AccountApp() {
                             className="rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm font-bold text-brand-700 transition-all hover:bg-blue-50"
                         >
                             返回主页
+                        </button>
+                        <button
+                            type="button"
+                            onClick={toggleThemeMode}
+                            className="rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-sm font-bold text-brand-700 transition-all hover:bg-blue-50"
+                        >
+                            {themeMode === "dark" ? "浅色模式" : "深色模式"}
                         </button>
                         <button
                             type="button"
