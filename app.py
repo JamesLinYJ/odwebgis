@@ -448,7 +448,7 @@ def create_app() -> Flask:
             return redirect(url_for("auth_page"))
         if user["user_type"] == "admin":
             return redirect(url_for("admin"))
-        return render_template("explorer.html")
+        return render_template("explorer.html", map_key=get_tianditu_api_key())
 
     @app.route("/auth")
     def auth_page() -> str:
@@ -466,7 +466,7 @@ def create_app() -> Flask:
             return redirect(url_for("auth_page"))
         if user["user_type"] != "admin":
             return redirect(url_for("home"))
-        return render_template("admin.html")
+        return render_template("admin.html", map_key=get_tianditu_api_key())
 
     @app.route("/admin/accounts")
     def admin_accounts_page() -> str:

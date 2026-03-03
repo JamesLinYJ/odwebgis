@@ -419,6 +419,26 @@
         }, 2200);
     }
 
+    function getMapKey() {
+        return String(window.__WEBGIS_MAP_KEY__ || "").trim();
+    }
+
+    function getTiandituLayerConfig(layer) {
+        const safeLayer = ["vec", "cva", "img", "cia"].includes(String(layer || "").toLowerCase())
+            ? String(layer).toLowerCase()
+            : "vec";
+        const key = getMapKey();
+        if (!key) return null;
+        return {
+            url: `https://t{s}.tianditu.gov.cn/${safeLayer}_w/wmts?service=wmts&request=GetTile&version=1.0.0&layer=${safeLayer}&style=default&tilematrixset=w&format=tiles&tilematrix={z}&tilerow={y}&tilecol={x}&tk=${encodeURIComponent(key)}`,
+            options: {
+                subdomains: ["0", "1", "2", "3", "4", "5", "6", "7"],
+                maxZoom: 18,
+                crossOrigin: true,
+            },
+        };
+    }
+
     window.api = {
         get,
         postJson,
@@ -435,5 +455,7 @@
         setTheme,
         toggleTheme,
         applyTheme,
+        getMapKey,
+        getTiandituLayerConfig,
     };
 })();

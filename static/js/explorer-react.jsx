@@ -394,6 +394,7 @@ function ExplorerApp() {
   const [baseMapMode, setBaseMapMode] = useState("vector");
   const [isCompactScreen, setIsCompactScreen] = useState(false);
   const [themeMode, setThemeMode] = useState(api.getTheme(api.getThemePreference()));
+  const [mapLibError, setMapLibError] = useState("");
   const layoutAutoInitRef = useRef(false);
 
   const categoryColors = useMemo(() => ({ 课堂: "#2563eb", 通勤: "#0891b2", 调研: "#7c3aed", 实习: "#f97316", 其他: "#4b5563" }), []);
@@ -605,11 +606,31 @@ function ExplorerApp() {
 
   useEffect(() => {
     if (!mapHostRef.current || mapRef.current) return;
-    const map = L.map(mapHostRef.current, { zoomControl: false, minZoom: 2, attributionControl: false }).setView([20, 110], 3);
-    const vec = L.tileLayer("/api/map/tile/vec/{z}/{x}/{y}", { maxZoom: 18 });
-    const cva = L.tileLayer("/api/map/tile/cva/{z}/{x}/{y}", { maxZoom: 18 });
-    const img = L.tileLayer("/api/map/tile/img/{z}/{x}/{y}", { maxZoom: 18 });
-    const cia = L.tileLayer("/api/map/tile/cia/{z}/{x}/{y}", { maxZoom: 18 });
+    if (!window.L || typeof L.map !== "function") {
+      setMapLibError("地图组件加载失败，请刷新页面重试");
+      return;
+    }
+    let map;
+    try {
+      map = L.map(mapHostRef.current, { zoomControl: false, minZoom: 2, attributionControl: false }).setView([20, 110], 3);
+    } catch (err) {
+      setMapLibError((err && err.message) ? `地图初始化失败：${err.message}` : "地图初始化失败，请刷新页面重试");
+      return;
+    }
+    const vecCfg = api.getTiandituLayerConfig("vec");
+    const cvaCfg = api.getTiandituLayerConfig("cva");
+    const imgCfg = api.getTiandituLayerConfig("img");
+    const ciaCfg = api.getTiandituLayerConfig("cia");
+    if (!vecCfg || !cvaCfg || !imgCfg || !ciaCfg) {
+      setMapLibError("未配置天地图 Key，请先在部署配置中设置");
+      map.remove();
+      return;
+    }
+    setMapLibError("");
+    const vec = L.tileLayer(vecCfg.url, vecCfg.options);
+    const cva = L.tileLayer(cvaCfg.url, cvaCfg.options);
+    const img = L.tileLayer(imgCfg.url, imgCfg.options);
+    const cia = L.tileLayer(ciaCfg.url, ciaCfg.options);
     vec.addTo(map);
     cva.addTo(map);
     baseTileLayersRef.current = { vec, cva, img, cia };
@@ -919,6 +940,13 @@ function ExplorerApp() {
       <main className={mapFullscreen ? "" : "grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_400px]"}>
         <section ref={mapSectionRef} className={`${mapFullscreen ? "fixed inset-0 z-[1300] rounded-none border-0" : "relative h-[54vh] min-h-[300px] overflow-hidden rounded-[1.4rem] border border-blue-100 bg-white/80 shadow-soft sm:h-[68vh] sm:min-h-[520px] sm:rounded-[2rem] lg:h-[calc(100vh-212px)] lg:min-h-[560px] xl:min-h-[620px]"} ios-card`}>
           <div ref={mapHostRef} className="h-full w-full" />
+          {mapLibError && (
+            <div className="pointer-events-none absolute inset-0 z-[950] flex items-center justify-center bg-white/75 px-4 text-center">
+              <div className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm font-bold text-rose-600 shadow-soft">
+                {mapLibError}
+              </div>
+            </div>
+          )}
 
           <div className="map-tool-stack absolute left-3 top-3 z-[900] flex flex-col gap-2 sm:left-4 sm:top-4">
             <button onClick={() => mapRef.current && mapRef.current.zoomIn()} className="ios-card rounded-xl border border-blue-100 bg-white/90 px-3 py-1.5 text-xl font-black text-admin-600 shadow-soft transition-all hover:bg-white">+</button>

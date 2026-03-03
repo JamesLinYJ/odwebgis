@@ -590,6 +590,10 @@ function AdminApp() {
 
     useEffect(() => {
         if (!mapHostRef.current || mapRef.current) return;
+        if (!window.L || typeof L.map !== "function") {
+            api.notify("地图组件加载失败，请刷新页面重试", true);
+            return;
+        }
 
         const map = L.map(mapHostRef.current, {
             zoomControl: false,
@@ -598,10 +602,19 @@ function AdminApp() {
         }).setView([35.2, 104.2], 5);
         const chinaBounds = [[18.0, 73.0], [54.5, 135.5]];
         map.setMaxBounds(chinaBounds);
-        const vec = L.tileLayer("/api/map/tile/vec/{z}/{x}/{y}", { maxZoom: 18 });
-        const cva = L.tileLayer("/api/map/tile/cva/{z}/{x}/{y}", { maxZoom: 18 });
-        const img = L.tileLayer("/api/map/tile/img/{z}/{x}/{y}", { maxZoom: 18 });
-        const cia = L.tileLayer("/api/map/tile/cia/{z}/{x}/{y}", { maxZoom: 18 });
+        const vecCfg = api.getTiandituLayerConfig("vec");
+        const cvaCfg = api.getTiandituLayerConfig("cva");
+        const imgCfg = api.getTiandituLayerConfig("img");
+        const ciaCfg = api.getTiandituLayerConfig("cia");
+        if (!vecCfg || !cvaCfg || !imgCfg || !ciaCfg) {
+            map.remove();
+            api.notify("未配置天地图 Key，请先在部署配置中设置", true);
+            return;
+        }
+        const vec = L.tileLayer(vecCfg.url, vecCfg.options);
+        const cva = L.tileLayer(cvaCfg.url, cvaCfg.options);
+        const img = L.tileLayer(imgCfg.url, imgCfg.options);
+        const cia = L.tileLayer(ciaCfg.url, ciaCfg.options);
         vec.addTo(map);
         cva.addTo(map);
         baseTileLayersRef.current = { vec, cva, img, cia };
