@@ -738,7 +738,7 @@ def add_common_runtime_options(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="WebGIS unified controller (Windows/Linux/WSL).")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
 
     p_setup = sub.add_parser("setup", help="Create venv and install Python/Node dependencies.")
     p_setup.add_argument("--python", default=sys.executable, help="Python executable path.")
@@ -810,6 +810,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 2
     try:
         return int(args.func(args))
     except subprocess.CalledProcessError as exc:
@@ -825,4 +828,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

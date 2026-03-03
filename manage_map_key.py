@@ -125,7 +125,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="WebGIS 天地图 API Key 命令行管理工具")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
 
     p_show = sub.add_parser("show", help="显示当前 Key 配置状态")
     p_show.set_defaults(func=cmd_show)
@@ -148,9 +148,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 2
     return int(args.func(args))
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

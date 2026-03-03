@@ -562,7 +562,7 @@ def cmd_reset_schema(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="WebGIS 账户管理工具")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
 
     p_list = sub.add_parser("list", help="列出账户")
     p_list.add_argument("--user-type", choices=["student", "admin"])
@@ -639,7 +639,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 2
     try:
         return int(args.func(args))
     except ValueError as exc:
@@ -649,4 +653,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -35,9 +35,26 @@ if [[ "$ASSUME_YES" != "1" ]]; then
   [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]] || exit 1
 fi
 
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+pick_python() {
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    echo "$PYTHON_BIN"
+    return 0
+  fi
+  if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+    echo "$ROOT_DIR/.venv/bin/python"
+    return 0
+  fi
+  for candidate in python3.12 python3.11 python3.10 python3.9 python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+PYTHON_BIN="$(pick_python)" || { echo "[ERROR] Python runtime not found."; exit 1; }
 if [[ "$REMOVE_ALL" == "1" ]]; then
   exec "$PYTHON_BIN" webgisctl.py clean all
 fi
 exec "$PYTHON_BIN" webgisctl.py clean runtime
-

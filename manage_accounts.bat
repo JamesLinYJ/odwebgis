@@ -1,7 +1,3 @@
-﻿REM 【中文注释】
-REM 文件说明：manage_accounts.bat 为 Windows 启动/管理脚本。
-REM 维护约定：命令行参数变更后请同步提示文案。
-
 @echo off
 setlocal
 
@@ -9,10 +5,28 @@ cd /d "%~dp0"
 
 where python >nul 2>nul
 if errorlevel 1 (
-  echo [ERROR] Python is not installed or not in PATH.
-  exit /b 1
+  where py >nul 2>nul
+  if errorlevel 1 (
+    echo [ERROR] Python is not installed or not in PATH.
+    exit /b 1
+  )
+)
+
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" manage_accounts.py %*
+  exit /b %errorlevel%
+)
+
+where py >nul 2>nul
+if not errorlevel 1 (
+  py -3.11 -V >nul 2>nul
+  if not errorlevel 1 (
+    py -3.11 manage_accounts.py %*
+    exit /b %errorlevel%
+  )
+  py -3 manage_accounts.py %*
+  exit /b %errorlevel%
 )
 
 python manage_accounts.py %*
 exit /b %errorlevel%
-
