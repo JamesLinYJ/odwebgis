@@ -27,14 +27,16 @@ function PasswordStrengthBar({ password, username = "" }) {
 
 function AdminAccountsApp() {
     const [loading, setLoading] = useState(true);
+    const [me, setMe] = useState(null);
     const [accounts, setAccounts] = useState([]);
+    const [canManagePrivileged, setCanManagePrivileged] = useState(false);
     const [themeMode, setThemeMode] = useState(api.getTheme(api.getThemePreference()));
     const [filter, setFilter] = useState({ q: "", user_type: "all" });
     const [form, setForm] = useState({
         name: "",
         username: "",
         password: "",
-        user_type: "student",
+        user_type: "normal_user",
     });
     const [formSubmitting, setFormSubmitting] = useState(false);
     const [deleteBusyId, setDeleteBusyId] = useState(null);
@@ -60,7 +62,12 @@ function AdminAccountsApp() {
         const res = await api.get("/api/auth/me");
         const user = res.user || null;
         if (!user) throw new Error("未登录");
-        if (user.user_type !== "admin") throw new Error("无管理员权限");
+        if (!api.isAdminType(user.user_type)) throw new Error("无管理员权限");
+        setMe(user);
+        const allowPrivileged = !!(user.is_system_admin || api.isSuperAdminType(user.user_type));
+        setCanManagePrivileged(allowPrivileged);
+        setFilter((prev) => ({ ...prev, user_type: allowPrivileged ? prev.user_type : (prev.user_type === "all" || prev.user_type === "normal_user" ? prev.user_type : "normal_user") }));
+        setForm((prev) => ({ ...prev, user_type: allowPrivileged ? "super_admin" : "normal_user" }));
     }
 
     async function loadAccounts() {
@@ -70,6 +77,13 @@ function AdminAccountsApp() {
         const query = params.toString();
         const res = await api.get(`/api/admin/accounts${query ? `?${query}` : ""}`);
         setAccounts(res.accounts || []);
+        if (typeof res.can_manage_privileged === "boolean") {
+            setCanManagePrivileged(res.can_manage_privileged);
+            if (!res.can_manage_privileged) {
+                setFilter((prev) => ({ ...prev, user_type: prev.user_type === "all" || prev.user_type === "normal_user" ? prev.user_type : "normal_user" }));
+                setForm((prev) => ({ ...prev, user_type: "normal_user" }));
+            }
+        }
     }
 
     async function bootstrap() {
@@ -127,6 +141,10 @@ function AdminAccountsApp() {
             api.notify(passwordErr, true);
             return;
         }
+        if (!canManagePrivileged && form.user_type !== "normal_user") {
+            api.notify("仅超级管理员可创建管理账户", true);
+            return;
+        }
 
         setFormSubmitting(true);
         try {
@@ -137,7 +155,7 @@ function AdminAccountsApp() {
                 user_type: form.user_type,
             });
             api.notify("账户创建成功");
-            setForm({ name: "", username: "", password: "", user_type: "student" });
+            setForm({ name: "", username: "", password: "", user_type: canManagePrivileged ? "super_admin" : "normal_user" });
             await loadAccounts();
         } catch (err) {
             api.notify(err.message || "创建失败，请稍后重试", true);
@@ -286,8 +304,8 @@ function AdminAccountsApp() {
                             onChange={(e) => setForm((prev) => ({ ...prev, user_type: e.target.value }))}
                             className="modern-input rounded-xl px-4 py-3 text-sm"
                         >
-                            <option value="student">普通账户</option>
-                            <option value="admin">管理员账户</option>
+                            <option value="normal_user">普通账户</option>
+                            {canManagePrivileged && <option value="super_admin">超级管理员账户</option>}
                         </select>
                         <input
                             required
@@ -337,8 +355,8 @@ function AdminAccountsApp() {
                             className="modern-input rounded-xl px-4 py-2.5 text-sm"
                         >
                             <option value="all">角色：全部</option>
-                            <option value="student">普通账户</option>
-                            <option value="admin">管理员</option>
+                            <option value="normal_user">普通账户</option>
+                            {canManagePrivileged && <option value="super_admin">超级管理员</option>}
                         </select>
                     </div>
 
@@ -349,7 +367,7 @@ function AdminAccountsApp() {
                                     <div className="min-w-0">
                                         <div className="truncate text-base font-bold text-slate-800">{acc.name}</div>
                                         <div className="mt-1 truncate text-xs font-semibold text-slate-500">
-                                            用户名：{acc.username || "-"} | {acc.user_type === "admin" ? "管理员" : "普通账户"}
+                                            用户名：{acc.username || "-"} | {api.userTypeLabel(acc.user_type)}
                                         </div>
                                         <div className="truncate text-xs font-semibold text-slate-500">
                                             状态：{acc.status} | 路线：{api.fmtNumber(acc.route_count)} 条
@@ -358,21 +376,25 @@ function AdminAccountsApp() {
                                     <div className="text-right text-[11px] font-bold text-slate-400">ID {acc.id}</div>
                                 </div>
                                 <div className="mt-3 flex flex-wrap items-center justify-end gap-2 sm:mt-4 sm:gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => openResetModal(acc)}
-                                        className="rounded-xl border border-admin-200 bg-white px-4 py-2 text-xs font-bold text-admin-600 transition-all hover:bg-admin-50"
-                                    >
-                                        重置密码
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => removeAccount(acc)}
-                                        disabled={deleteBusyId === acc.id}
-                                        className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-bold text-rose-600 transition-all hover:bg-rose-50 disabled:opacity-60"
-                                    >
-                                        {deleteBusyId === acc.id ? "删除中..." : "删除账户"}
-                                    </button>
+                                    {(canManagePrivileged || acc.user_type === "normal_user") && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => openResetModal(acc)}
+                                                className="rounded-xl border border-admin-200 bg-white px-4 py-2 text-xs font-bold text-admin-600 transition-all hover:bg-admin-50"
+                                            >
+                                                重置密码
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => removeAccount(acc)}
+                                                disabled={deleteBusyId === acc.id}
+                                                className="rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-bold text-rose-600 transition-all hover:bg-rose-50 disabled:opacity-60"
+                                            >
+                                                {deleteBusyId === acc.id ? "删除中..." : "删除账户"}
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -455,3 +477,4 @@ if (ReactDOM.createRoot) {
 } else {
     ReactDOM.render(<AdminAccountsApp />, adminAccountsRootNode);
 }
+

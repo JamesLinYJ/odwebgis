@@ -1,4 +1,4 @@
-﻿/* 【中文注释】
+/* 【中文注释】
  * 文件说明：admin-react.jsx 为前端 React 页面源码，承载主要交互逻辑。
  * 维护约定：组件状态变更需同步检查地图与表单交互。
  */
@@ -247,7 +247,7 @@ function AdminApp() {
         name: "",
         account: "",
         password: "",
-        user_type: "student",
+        user_type: "normal_user",
     });
     const [accountSubmitting, setAccountSubmitting] = useState(false);
     const [accountResetBusyId, setAccountResetBusyId] = useState(null);
@@ -270,6 +270,10 @@ function AdminApp() {
     });
     const [me, setMe] = useState(null);
     const [securityHintShown, setSecurityHintShown] = useState(false);
+    const canManagePrivileged = useMemo(
+        () => !!(me?.is_system_admin || api.isSuperAdminType(me?.user_type)),
+        [me]
+    );
 
     const userMap = useMemo(() => {
         const map = new Map();
@@ -377,7 +381,7 @@ function AdminApp() {
         if (!user) {
             throw new Error("未登录");
         }
-        if (user.user_type !== "admin") {
+        if (!api.isAdminType(user.user_type)) {
             throw new Error("无管理员权限");
         }
         if (user.must_change_password && !securityHintShown) {
@@ -390,7 +394,7 @@ function AdminApp() {
 
     async function loadUsers() {
         const params = new URLSearchParams();
-        params.set("user_type", "student");
+        params.set("user_type", "normal_user");
         if (filters.q) params.set("q", filters.q);
         if (filters.status) params.set("status", filters.status);
 
@@ -500,6 +504,10 @@ function AdminApp() {
         window.addEventListener("webgis-theme-change", onThemeChange);
         return () => window.removeEventListener("webgis-theme-change", onThemeChange);
     }, []);
+
+    useEffect(() => {
+        setAccountForm((prev) => ({ ...prev, user_type: canManagePrivileged ? "super_admin" : "normal_user" }));
+    }, [canManagePrivileged]);
 
     useEffect(() => {
         if (!selectedUserId) {
@@ -1178,6 +1186,10 @@ function AdminApp() {
             api.notify(passwordErr, true);
             return;
         }
+        if (!canManagePrivileged && accountForm.user_type !== "normal_user") {
+            api.notify("仅超级管理员可创建管理账户", true);
+            return;
+        }
 
         setAccountSubmitting(true);
         try {
@@ -1192,7 +1204,7 @@ function AdminApp() {
                 name: "",
                 account: "",
                 password: "",
-                user_type: "student",
+                user_type: canManagePrivileged ? "super_admin" : "normal_user",
             });
             await Promise.all([loadAccounts(), loadUsers(), loadOverview()]);
         } catch (err) {
@@ -2009,3 +2021,4 @@ if (ReactDOM.createRoot) {
 } else {
     ReactDOM.render(<AdminApp />, adminRootNode);
 }
+

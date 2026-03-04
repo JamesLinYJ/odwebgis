@@ -1,4 +1,4 @@
-﻿# 【中文注释】
+# 【中文注释】
 # 文件说明：app.py 为项目自研源码文件，包含核心业务逻辑。
 # 维护约定：变更前先确认输入输出与调用链，避免影响前后端联调。
 
@@ -39,12 +39,17 @@ TILE_RATE_LIMIT_PER_MIN = 900
 TILE_RATE_WINDOW_SECONDS = 60
 TILE_CACHE_DIR = os.path.join(BASE_DIR, ".tile_cache")
 TILE_CACHE_TTL_SECONDS = 86400
-SCHEMA_VERSION = "20260303_v3"
+SCHEMA_VERSION = "20260304_v5"
 COORD_SYSTEM_WGS84 = "wgs84"
 COORD_SYSTEM_GCJ02 = "gcj02"
 GCJ_A = 6378245.0
 GCJ_EE = 0.00669342162296594323
 _tile_rate_buckets: dict[str, deque[float]] = {}
+
+USER_TYPE_NORMAL_USER = "normal_user"
+USER_TYPE_ADMIN = "admin"
+USER_TYPE_SUPER_ADMIN = "super_admin"
+ADMIN_USER_TYPES = {USER_TYPE_ADMIN, USER_TYPE_SUPER_ADMIN}
 
 
 def utc_now_text() -> str:
@@ -84,6 +89,22 @@ def normalize_user_status(status: str | None, default: str = "offline") -> str:
 def user_status_label(status_code: str | None) -> str:
     code = normalize_user_status(status_code)
     return "在线" if code == "online" else "离线"
+
+
+def normalize_user_type(user_type: str | None, default: str = USER_TYPE_NORMAL_USER) -> str:
+    value = (user_type or "").strip().lower()
+    if value in {USER_TYPE_NORMAL_USER, USER_TYPE_ADMIN, USER_TYPE_SUPER_ADMIN}:
+        return value
+    return default
+
+
+def user_type_label(user_type: str | None) -> str:
+    code = normalize_user_type(user_type, USER_TYPE_NORMAL_USER)
+    if code == USER_TYPE_SUPER_ADMIN:
+        return "超级管理员"
+    if code == USER_TYPE_ADMIN:
+        return "管理员"
+    return "普通账户"
 
 
 def validate_username(username: str) -> str | None:
@@ -328,7 +349,7 @@ def build_system_admin_user(status: str = "online") -> dict[str, Any]:
         "status": user_status_label(status),
         "status_code": normalize_user_status(status),
         "avatar_url": LOCAL_DEFAULT_AVATAR,
-        "user_type": "admin",
+        "user_type": USER_TYPE_SUPER_ADMIN,
         "username": account,
         "created_at": now,
         "last_active_at": now,
@@ -341,6 +362,33 @@ def build_system_admin_user(status: str = "online") -> dict[str, Any]:
 
 def is_system_admin_user(user: sqlite3.Row | dict[str, Any] | None) -> bool:
     return isinstance(user, dict) and bool(user.get("is_system_admin"))
+
+
+def user_type_from_user(user: sqlite3.Row | dict[str, Any] | None) -> str:
+    if user is None:
+        return ""
+    if isinstance(user, sqlite3.Row):
+        return normalize_user_type(user["user_type"], "")
+    if isinstance(user, dict):
+        return normalize_user_type(str(user.get("user_type") or ""), "")
+    return ""
+
+
+def is_super_admin_user(user: sqlite3.Row | dict[str, Any] | None) -> bool:
+    if is_system_admin_user(user):
+        return True
+    return user_type_from_user(user) == USER_TYPE_SUPER_ADMIN
+
+
+def is_admin_user(user: sqlite3.Row | dict[str, Any] | None) -> bool:
+    return user_type_from_user(user) in ADMIN_USER_TYPES or is_system_admin_user(user)
+
+
+def can_manage_target_user(viewer: sqlite3.Row | dict[str, Any] | None, target_user_type: str | None) -> bool:
+    # 普通管理员仅可管理学生账户；超级管理员可管理所有账户。
+    if is_super_admin_user(viewer):
+        return True
+    return normalize_user_type(target_user_type, "") == USER_TYPE_NORMAL_USER
 
 
 def create_app() -> Flask:
@@ -437,7 +485,7 @@ def create_app() -> Flask:
         user = session_user()
         if user is None:
             return None, (jsonify({"ok": False, "message": "未登录"}), 401)
-        if user["user_type"] != "admin":
+        if not is_admin_user(user):
             return None, (jsonify({"ok": False, "message": "无管理员权限"}), 403)
         return user, None
 
@@ -446,7 +494,7 @@ def create_app() -> Flask:
         user = session_user()
         if user is None:
             return redirect(url_for("auth_page"))
-        if user["user_type"] == "admin":
+        if is_admin_user(user):
             return redirect(url_for("admin"))
         return render_template("explorer.html", map_key=get_tianditu_api_key())
 
@@ -454,7 +502,7 @@ def create_app() -> Flask:
     def auth_page() -> str:
         user = session_user()
         if user is not None:
-            if user["user_type"] == "admin":
+            if is_admin_user(user):
                 return redirect(url_for("admin"))
             return redirect(url_for("home"))
         return render_template("auth.html")
@@ -464,7 +512,7 @@ def create_app() -> Flask:
         user = session_user()
         if user is None:
             return redirect(url_for("auth_page"))
-        if user["user_type"] != "admin":
+        if not is_admin_user(user):
             return redirect(url_for("home"))
         return render_template("admin.html", map_key=get_tianditu_api_key())
 
@@ -473,7 +521,7 @@ def create_app() -> Flask:
         user = session_user()
         if user is None:
             return redirect(url_for("auth_page"))
-        if user["user_type"] != "admin":
+        if not is_admin_user(user):
             return redirect(url_for("home"))
         return render_template("admin_accounts.html")
 
@@ -626,7 +674,7 @@ def create_app() -> Flask:
             (
                 name,
                 username,
-                "student",
+                USER_TYPE_NORMAL_USER,
                 "offline",
                 avatar_url,
                 generate_password_hash(normalize_password_secret(password)),
@@ -687,7 +735,7 @@ def create_app() -> Flask:
             (
                 name,
                 username,
-                "student",
+                USER_TYPE_NORMAL_USER,
                 "online",
                 LOCAL_DEFAULT_AVATAR,
                 generate_password_hash(guest_secret),
@@ -795,7 +843,7 @@ def create_app() -> Flask:
         )
         append_login_ip_history(db, uid, extract_client_ip(request), utc_now_text(), keep=10)
         db.commit()
-        redirect_path = "/admin" if row["user_type"] == "admin" else "/"
+        redirect_path = "/admin" if normalize_user_type(row["user_type"], "") in ADMIN_USER_TYPES else "/"
         return jsonify(
             {
                 "ok": True,
@@ -909,16 +957,30 @@ def create_app() -> Flask:
             sql.append("AND r.category = ?")
             params.append(category)
 
-        if user["user_type"] != "admin":
+        if not is_admin_user(user):
             sql.append("AND r.user_id = ?")
             params.append(int(user["id"]))
-        elif user_id:
-            try:
-                uid = int(user_id)
+        else:
+            # 普通管理员只能看学生线路，超级管理员可看全部。
+            if not is_super_admin_user(user):
+                sql.append("AND COALESCE(u.user_type, '') = ?")
+                params.append(USER_TYPE_NORMAL_USER)
+            if user_id:
+                try:
+                    uid = int(user_id)
+                except ValueError:
+                    return jsonify({"ok": False, "message": "user_id 非法"}), 400
+                if not is_super_admin_user(user):
+                    target_user = db.execute(
+                        "SELECT id, user_type FROM users WHERE id = ?",
+                        (uid,),
+                    ).fetchone()
+                    if target_user is None:
+                        return jsonify({"ok": False, "message": "用户不存在"}), 404
+                    if not can_manage_target_user(user, target_user["user_type"]):
+                        return jsonify({"ok": False, "message": "无权限查看该用户路线"}), 403
                 sql.append("AND r.user_id = ?")
                 params.append(uid)
-            except ValueError:
-                return jsonify({"ok": False, "message": "user_id 非法"}), 400
 
         sql.append("ORDER BY datetime(r.created_at) DESC LIMIT ?")
         params.append(limit)
@@ -960,10 +1022,21 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "message": "未登录"}), 401
 
         db = get_db()
-        route = db.execute("SELECT id, user_id FROM od_routes WHERE id = ?", (route_id,)).fetchone()
+        route = db.execute(
+            """
+            SELECT r.id, r.user_id, u.user_type AS target_user_type
+            FROM od_routes r
+            LEFT JOIN users u ON u.id = r.user_id
+            WHERE r.id = ?
+            """,
+            (route_id,),
+        ).fetchone()
         if route is None:
             return jsonify({"ok": False, "message": "未找到该路线"}), 404
-        if user["user_type"] != "admin" and int(route["user_id"]) != int(user["id"]):
+        if not is_admin_user(user):
+            if int(route["user_id"]) != int(user["id"]):
+                return jsonify({"ok": False, "message": "无权限删除该路线"}), 403
+        elif not can_manage_target_user(user, route["target_user_type"]):
             return jsonify({"ok": False, "message": "无权限删除该路线"}), 403
 
         cur = db.execute("DELETE FROM od_routes WHERE id = ?", (route_id,))
@@ -1072,7 +1145,7 @@ def create_app() -> Flask:
 
     @app.get("/api/users")
     def list_users() -> Any:
-        _, err = require_admin()
+        admin_user, err = require_admin()
         if err:
             return err
 
@@ -1107,8 +1180,16 @@ def create_app() -> Flask:
             sql.append("AND u.status = ?")
             params.append(status)
         if user_type:
+            normalized_user_type = normalize_user_type(user_type, "")
+            if normalized_user_type not in {USER_TYPE_NORMAL_USER, USER_TYPE_ADMIN, USER_TYPE_SUPER_ADMIN}:
+                return jsonify({"ok": False, "message": "user_type 非法"}), 400
+            if not can_manage_target_user(admin_user, normalized_user_type):
+                return jsonify({"ok": False, "message": "无权限查看该角色"}), 403
             sql.append("AND u.user_type = ?")
-            params.append(user_type)
+            params.append(normalized_user_type)
+        elif not is_super_admin_user(admin_user):
+            sql.append("AND u.user_type = ?")
+            params.append(USER_TYPE_NORMAL_USER)
 
         sql.append("GROUP BY u.id ORDER BY route_count DESC, datetime(COALESCE(u.last_active_at, u.created_at)) DESC")
         rows = db.execute("\n".join(sql), params).fetchall()
@@ -1116,7 +1197,7 @@ def create_app() -> Flask:
 
     @app.get("/api/users/<int:user_id>/summary")
     def user_summary(user_id: int) -> Any:
-        _, err = require_admin()
+        admin_user, err = require_admin()
         if err:
             return err
 
@@ -1135,6 +1216,8 @@ def create_app() -> Flask:
 
         if user is None:
             return jsonify({"ok": False, "message": "用户不存在"}), 404
+        if not can_manage_target_user(admin_user, user["user_type"]):
+            return jsonify({"ok": False, "message": "无权限查看该账户"}), 403
 
         routes = db.execute(
             """
@@ -1171,13 +1254,15 @@ def create_app() -> Flask:
 
     @app.get("/api/admin/accounts/<int:account_id>/login-history")
     def admin_account_login_history(account_id: int) -> Any:
-        _, err = require_admin()
+        admin_user, err = require_admin()
         if err:
             return err
         db = get_db()
-        target = db.execute("SELECT id FROM users WHERE id = ?", (account_id,)).fetchone()
+        target = db.execute("SELECT id, user_type FROM users WHERE id = ?", (account_id,)).fetchone()
         if target is None:
             return jsonify({"ok": False, "message": "账户不存在"}), 404
+        if not can_manage_target_user(admin_user, target["user_type"]):
+            return jsonify({"ok": False, "message": "无权限查看该账户"}), 403
         return jsonify({"ok": True, "history": fetch_login_ip_history(db, int(account_id), limit=10)})
 
     @app.get("/api/alerts")
@@ -1297,16 +1382,16 @@ def create_app() -> Flask:
 
         db = get_db()
         total_students = db.execute(
-            "SELECT COUNT(*) AS v FROM users WHERE user_type = 'student'"
+            "SELECT COUNT(*) AS v FROM users WHERE user_type = 'normal_user'"
         ).fetchone()["v"]
         active_students = db.execute(
-            "SELECT COUNT(*) AS v FROM users WHERE user_type = 'student' AND status = 'online'"
+            "SELECT COUNT(*) AS v FROM users WHERE user_type = 'normal_user' AND status = 'online'"
         ).fetchone()["v"]
         new_students_today = db.execute(
             """
             SELECT COUNT(*) AS v
             FROM users
-            WHERE user_type = 'student'
+            WHERE user_type = 'normal_user'
               AND date(created_at) = date('now')
             """
         ).fetchone()["v"]
@@ -1317,7 +1402,7 @@ def create_app() -> Flask:
             SELECT u.id, u.name, COUNT(r.id) AS route_count
             FROM users u
             LEFT JOIN od_routes r ON r.user_id = u.id
-            WHERE u.user_type = 'student'
+            WHERE u.user_type = 'normal_user'
             GROUP BY u.id
             ORDER BY route_count DESC
             LIMIT 1
@@ -1337,7 +1422,7 @@ def create_app() -> Flask:
 
     @app.get("/api/admin/accounts")
     def admin_list_accounts() -> Any:
-        _, err = require_admin()
+        admin_user, err = require_admin()
         if err:
             return err
 
@@ -1368,16 +1453,31 @@ def create_app() -> Flask:
                 """
             )
             params.extend([like, like, like])
-        if user_type in {"student", "admin"}:
+        if user_type:
+            normalized_type = normalize_user_type(user_type, "")
+            if normalized_type not in {USER_TYPE_NORMAL_USER, USER_TYPE_ADMIN, USER_TYPE_SUPER_ADMIN}:
+                return jsonify({"ok": False, "message": "user_type 非法"}), 400
+            if not can_manage_target_user(admin_user, normalized_type):
+                return jsonify({"ok": False, "message": "无权限查看该角色"}), 403
             sql.append("AND u.user_type = ?")
-            params.append(user_type)
+            params.append(normalized_type)
+        elif not is_super_admin_user(admin_user):
+            sql.append("AND u.user_type = ?")
+            params.append(USER_TYPE_NORMAL_USER)
         if status:
             sql.append("AND u.status = ?")
             params.append(status)
 
         sql.append("GROUP BY u.id ORDER BY datetime(COALESCE(u.created_at, u.last_active_at)) DESC, u.id DESC")
         rows = db.execute("\n".join(sql), params).fetchall()
-        return jsonify({"ok": True, "accounts": [user_row_to_dict(r) for r in rows]})
+        return jsonify(
+            {
+                "ok": True,
+                "accounts": [user_row_to_dict(r) for r in rows],
+                "viewer_role": user_type_from_user(admin_user),
+                "can_manage_privileged": bool(is_super_admin_user(admin_user)),
+            }
+        )
 
     @app.post("/api/admin/accounts")
     def admin_create_account() -> Any:
@@ -1389,7 +1489,8 @@ def create_app() -> Flask:
         name = (payload.get("name") or "").strip()
         account = (payload.get("username") or "").strip()
         password = (payload.get("password") or "").strip()
-        user_type = (payload.get("user_type") or "student").strip().lower()
+        user_type_raw = (payload.get("user_type") or USER_TYPE_NORMAL_USER).strip().lower()
+        user_type = USER_TYPE_SUPER_ADMIN if user_type_raw == USER_TYPE_ADMIN else normalize_user_type(user_type_raw, "")
 
         if not name:
             return jsonify({"ok": False, "message": "姓名不能为空"}), 400
@@ -1399,8 +1500,10 @@ def create_app() -> Flask:
         password_err = validate_password_strength(password, account)
         if password_err:
             return jsonify({"ok": False, "message": password_err}), 400
-        if user_type not in {"student", "admin"}:
-            return jsonify({"ok": False, "message": "user_type 仅支持 student/admin"}), 400
+        if user_type not in {USER_TYPE_NORMAL_USER, USER_TYPE_SUPER_ADMIN}:
+            return jsonify({"ok": False, "message": "user_type 仅支持 normal_user/super_admin"}), 400
+        if user_type != USER_TYPE_NORMAL_USER and not is_super_admin_user(admin_user):
+            return jsonify({"ok": False, "message": "仅超级管理员可创建管理账户"}), 403
 
         db = get_db()
         exists = db.execute(
@@ -1455,6 +1558,8 @@ def create_app() -> Flask:
         target = db.execute("SELECT id, user_type FROM users WHERE id = ?", (account_id,)).fetchone()
         if target is None:
             return jsonify({"ok": False, "message": "账户不存在"}), 404
+        if not can_manage_target_user(admin_user, target["user_type"]):
+            return jsonify({"ok": False, "message": "无权限删除该账户"}), 403
 
         db.execute("DELETE FROM od_routes WHERE user_id = ?", (account_id,))
         db.execute("DELETE FROM users WHERE id = ?", (account_id,))
@@ -1478,6 +1583,8 @@ def create_app() -> Flask:
         ).fetchone()
         if target is None:
             return jsonify({"ok": False, "message": "账户不存在"}), 404
+        if not can_manage_target_user(admin_user, target["user_type"]):
+            return jsonify({"ok": False, "message": "无权限删除该账户路线"}), 403
 
         cur = db.execute("DELETE FROM od_routes WHERE user_id = ?", (account_id,))
         db.execute(
@@ -1499,9 +1606,11 @@ def create_app() -> Flask:
             return jsonify({"ok": False, "message": "请输入新密码"}), 400
 
         db = get_db()
-        target = db.execute("SELECT id, username FROM users WHERE id = ?", (account_id,)).fetchone()
+        target = db.execute("SELECT id, username, user_type FROM users WHERE id = ?", (account_id,)).fetchone()
         if target is None:
             return jsonify({"ok": False, "message": "账户不存在"}), 404
+        if not can_manage_target_user(admin_user, target["user_type"]):
+            return jsonify({"ok": False, "message": "无权限重置该账户密码"}), 403
         password_err = validate_password_strength(new_password, target["username"] or "")
         if password_err:
             return jsonify({"ok": False, "message": password_err}), 400
@@ -1529,22 +1638,28 @@ def create_app() -> Flask:
     @app.get("/api/export/accounts-csv")
     @app.get("/api/export/users-csv")
     def export_accounts_csv() -> Any:
-        _, err = require_admin()
+        admin_user, err = require_admin()
         if err:
             return err
 
         db = get_db()
-        rows = db.execute(
+        sql = [
             """
             SELECT u.id, u.name, u.status, u.user_type, u.username,
                    COUNT(r.id) AS route_count,
                    u.last_active_at
             FROM users u
             LEFT JOIN od_routes r ON r.user_id = u.id
-            GROUP BY u.id
-            ORDER BY route_count DESC
+            WHERE 1=1
             """
-        ).fetchall()
+        ]
+        params: list[Any] = []
+        if not is_super_admin_user(admin_user):
+            sql.append("AND u.user_type = ?")
+            params.append(USER_TYPE_NORMAL_USER)
+        sql.append("GROUP BY u.id")
+        sql.append("ORDER BY route_count DESC")
+        rows = db.execute("\n".join(sql), params).fetchall()
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -1558,7 +1673,7 @@ def create_app() -> Flask:
                     r["name"],
                     r["username"] or "",
                     user_status_label(r["status"]),
-                    "管理员" if r["user_type"] == "admin" else "普通账户",
+                    user_type_label(r["user_type"]),
                     r["route_count"],
                     r["last_active_at"],
                 ]
@@ -1755,8 +1870,21 @@ def insert_route(db: sqlite3.Connection, payload: dict[str, Any]) -> int:
     except ValueError as exc:
         raise ValueError("user_id 非法") from exc
 
-    if session_user_id is not None and session_user_type != "admin" and user_id != session_user_id:
+    if (
+        session_user_id is not None
+        and normalize_user_type(session_user_type, "") not in ADMIN_USER_TYPES
+        and user_id != session_user_id
+    ):
         raise ValueError("无权为其他用户录入路线")
+
+    if session_user_id is not None and normalize_user_type(session_user_type, "") in ADMIN_USER_TYPES:
+        viewer_role = normalize_user_type(session_user_type, "")
+        if viewer_role != USER_TYPE_SUPER_ADMIN:
+            target_row = db.execute("SELECT user_type FROM users WHERE id = ?", (user_id,)).fetchone()
+            if target_row is None:
+                raise ValueError("user_id 对应用户不存在")
+            if normalize_user_type(target_row["user_type"], "") != USER_TYPE_NORMAL_USER:
+                raise ValueError("无权为该账户录入路线")
 
     user_exists = db.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
     if user_exists is None:
@@ -1895,7 +2023,7 @@ def user_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     result["status_code"] = status_code
     result["status"] = user_status_label(status_code)
     result["username"] = result.get("username") or ""
-    result["role"] = "管理员" if result.get("user_type") == "admin" else "普通账户"
+    result["role"] = user_type_label(result.get("user_type"))
     result["must_change_password"] = bool(int(result.get("force_password_change") or 0))
     result["route_count"] = int(result.get("route_count", 0))
     result["is_system_admin"] = False
@@ -1924,7 +2052,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
                 name TEXT NOT NULL,
-                user_type TEXT NOT NULL CHECK(user_type IN ('student', 'admin')),
+                user_type TEXT NOT NULL CHECK(user_type IN ('normal_user', 'admin', 'super_admin')),
                 status TEXT NOT NULL DEFAULT 'offline' CHECK(status IN ('online', 'offline')),
                 avatar_url TEXT NOT NULL DEFAULT '/static/images/avatar-default.svg',
                 password_hash TEXT NOT NULL,
@@ -2013,4 +2141,6 @@ if __name__ == "__main__":
     except ValueError:
         port = 5000
     app.run(host=host, port=port, debug=False)
+
+
 

@@ -515,7 +515,7 @@ def ensure_admin_account(
     force_change: bool,
 ) -> None:
     if username_exists(username):
-        run_cmd([str(venv_python), "manage_accounts.py", "update", "--username", username, "--user-type", "admin"])
+        run_cmd([str(venv_python), "manage_accounts.py", "update", "--username", username, "--user-type", "super_admin"])
         cmd = [
             str(venv_python),
             "manage_accounts.py",
@@ -539,7 +539,7 @@ def ensure_admin_account(
         "--username",
         username,
         "--user-type",
-        "admin",
+        "super_admin",
         "--password",
         password,
     ]

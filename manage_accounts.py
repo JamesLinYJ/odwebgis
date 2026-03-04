@@ -20,7 +20,17 @@ DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 PASSWORD_MIN_LENGTH = 6
 PASSWORD_MAX_LENGTH = 64
 LOCAL_DEFAULT_AVATAR = "/static/images/avatar-default.svg"
-SCHEMA_VERSION = "20260303_v3"
+SCHEMA_VERSION = "20260304_v5"
+USER_TYPE_NORMAL_USER = "normal_user"
+USER_TYPE_ADMIN = "admin"
+USER_TYPE_SUPER_ADMIN = "super_admin"
+
+
+def normalize_user_type(user_type: str | None, default: str = USER_TYPE_NORMAL_USER) -> str:
+    value = (user_type or "").strip().lower()
+    if value in {USER_TYPE_NORMAL_USER, USER_TYPE_ADMIN, USER_TYPE_SUPER_ADMIN}:
+        return value
+    return default
 
 
 def utc_now_text() -> str:
@@ -137,7 +147,7 @@ def rebuild_schema(db: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
-            user_type TEXT NOT NULL CHECK(user_type IN ('student', 'admin')),
+            user_type TEXT NOT NULL CHECK(user_type IN ('normal_user', 'admin', 'super_admin')),
             status TEXT NOT NULL DEFAULT 'offline' CHECK(status IN ('online', 'offline')),
             avatar_url TEXT NOT NULL DEFAULT '/static/images/avatar-default.svg',
             password_hash TEXT NOT NULL,
@@ -252,7 +262,7 @@ def row_payload(db: sqlite3.Connection, row: sqlite3.Row) -> dict:
         "id": int(row["id"]),
         "name": row["name"] or "",
         "username": row["username"] or "",
-        "user_type": row["user_type"] or "student",
+        "user_type": row["user_type"] or "normal_user",
         "status": normalize_user_status(row["status"]),
         "avatar_url": row["avatar_url"] or LOCAL_DEFAULT_AVATAR,
         "failed_login_count": int(row["failed_login_count"] or 0),
@@ -283,7 +293,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         params: list = []
         if args.user_type:
             sql.append("AND u.user_type = ?")
-            params.append(args.user_type)
+            params.append(normalize_user_type(args.user_type))
         if args.status:
             sql.append("AND u.status = ?")
             params.append(normalize_user_status(args.status))
@@ -311,7 +321,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         for r in payload:
             print(
                 f"{int(r['id']):<4} {str(r.get('username') or ''):<24} {str(r.get('name') or ''):<12} "
-                f"{str(r.get('user_type') or 'student'):<8} {normalize_user_status(r.get('status')):<8} "
+                f"{str(r.get('user_type') or 'normal_user'):<8} {normalize_user_status(r.get('status')):<8} "
                 f"{int(r.get('route_count') or 0):<6} {int(r.get('failed_login_count') or 0):<8} "
                 f"{('yes' if r.get('lock_until') else 'no'):<6} {('yes' if int(r.get('force_password_change') or 0) else 'no'):<6}"
             )
@@ -353,7 +363,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         return 1
     password_hash = generate_password_hash(digest)
     now_text = utc_now_text()
-    user_type = args.user_type
+    user_type = normalize_user_type(args.user_type)
     status = normalize_user_status(args.status, default="offline")
     force_password_change = 1 if args.force_change else 0
 
@@ -411,7 +421,7 @@ def cmd_update(args: argparse.Namespace) -> int:
 
         if args.user_type is not None:
             updates.append("user_type = ?")
-            params.append(args.user_type)
+            params.append(normalize_user_type(args.user_type))
 
         if args.avatar_url is not None:
             updates.append("avatar_url = ?")
@@ -442,7 +452,7 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def cmd_set_role(args: argparse.Namespace) -> int:
-    args.user_type = args.user_type
+    args.user_type = normalize_user_type(args.user_type)
     return cmd_update(args)
 
 
@@ -517,8 +527,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
     db = get_db()
     try:
         total_users = int(db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"] or 0)
+        total_super_admin = int(db.execute("SELECT COUNT(*) AS c FROM users WHERE user_type='super_admin'").fetchone()["c"] or 0)
         total_admin = int(db.execute("SELECT COUNT(*) AS c FROM users WHERE user_type='admin'").fetchone()["c"] or 0)
-        total_students = int(db.execute("SELECT COUNT(*) AS c FROM users WHERE user_type='student'").fetchone()["c"] or 0)
+        total_normal_users = int(db.execute("SELECT COUNT(*) AS c FROM users WHERE user_type='normal_user'").fetchone()["c"] or 0)
         total_online = int(db.execute("SELECT COUNT(*) AS c FROM users WHERE status='online'").fetchone()["c"] or 0)
         total_locked = int(
             db.execute("SELECT COUNT(*) AS c FROM users WHERE lock_until IS NOT NULL AND TRIM(lock_until) <> ''").fetchone()["c"]
@@ -528,8 +539,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
         total_routes = int(db.execute("SELECT COUNT(*) AS c FROM od_routes").fetchone()["c"] or 0)
         payload = {
             "total_users": total_users,
+            "super_admin_users": total_super_admin,
             "admin_users": total_admin,
-            "student_users": total_students,
+            "normal_user_users": total_normal_users,
             "online_users": total_online,
             "locked_users": total_locked,
             "must_change_password_users": must_change,
@@ -580,7 +592,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     p_list = sub.add_parser("list", help="列出账户")
-    p_list.add_argument("--user-type", choices=["student", "admin"])
+    p_list.add_argument("--user-type", choices=["normal_user", "admin", "super_admin"])
     p_list.add_argument("--status")
     p_list.add_argument("--keyword")
     p_list.add_argument("--limit", type=int, default=100)
@@ -597,7 +609,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_create = sub.add_parser("create", help="创建账户")
     p_create.add_argument("--name", required=True)
     p_create.add_argument("--username", required=True)
-    p_create.add_argument("--user-type", choices=["student", "admin"], default="student")
+    p_create.add_argument("--user-type", choices=["normal_user", "admin", "super_admin"], default="normal_user")
     p_create.add_argument("--status", default="offline")
     p_create.add_argument("--avatar-url", default=LOCAL_DEFAULT_AVATAR)
     p_create.add_argument("--password")
@@ -611,7 +623,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--username")
     p_update.add_argument("--name")
     p_update.add_argument("--status")
-    p_update.add_argument("--user-type", choices=["student", "admin"])
+    p_update.add_argument("--user-type", choices=["normal_user", "admin", "super_admin"])
     p_update.add_argument("--avatar-url")
     p_update.add_argument("--force-change", action="store_true")
     p_update.add_argument("--clear-force-change", action="store_true")
@@ -621,7 +633,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_role = sub.add_parser("set-role", help="设置账户角色")
     p_role.add_argument("--id", type=int)
     p_role.add_argument("--username")
-    p_role.add_argument("--user-type", choices=["student", "admin"], required=True)
+    p_role.add_argument("--user-type", choices=["normal_user", "admin", "super_admin"], required=True)
     p_role.set_defaults(func=cmd_set_role)
 
     p_reset = sub.add_parser("reset-password", help="重置密码")
@@ -669,3 +681,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

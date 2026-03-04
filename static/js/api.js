@@ -419,6 +419,28 @@
         }, 2200);
     }
 
+    function normalizeUserType(userType) {
+        const value = String(userType || "").trim().toLowerCase();
+        if (value === "normal_user" || value === "admin" || value === "super_admin") return value;
+        return "normal_user";
+    }
+
+    function isAdminType(userType) {
+        const value = normalizeUserType(userType);
+        return value === "admin" || value === "super_admin";
+    }
+
+    function isSuperAdminType(userType) {
+        return normalizeUserType(userType) === "super_admin";
+    }
+
+    function userTypeLabel(userType) {
+        const value = normalizeUserType(userType);
+        if (value === "super_admin") return "超级管理员";
+        if (value === "admin") return "管理员";
+        return "普通账户";
+    }
+
     function getMapKey() {
         return String(window.__WEBGIS_MAP_KEY__ || "").trim();
     }
@@ -457,5 +479,10 @@
         applyTheme,
         getMapKey,
         getTiandituLayerConfig,
+        normalizeUserType,
+        isAdminType,
+        isSuperAdminType,
+        userTypeLabel,
     };
 })();
+

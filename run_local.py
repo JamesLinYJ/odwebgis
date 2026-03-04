@@ -58,6 +58,10 @@ def http_ok(path: str, timeout: float = 3.0) -> bool:
     return http_status(path, timeout=timeout) == 200
 
 
+def http_reachable(path: str = "/", timeout: float = 3.0) -> bool:
+    return http_status(path, timeout=timeout) is not None
+
+
 def wait_ready(retries: int = 30, delay: float = 0.5) -> bool:
     for i in range(retries):
         if http_ok("/"):
@@ -114,7 +118,7 @@ def stop_server() -> bool:
     port = get_port()
     pid = find_pid_on_port(port)
     if pid is None:
-        if not http_ok("/"):
+        if not http_reachable("/"):
             return True  # nothing running
         print(f"  [WARN] Server on port {port} but cannot find PID")
         return False
@@ -138,7 +142,7 @@ def stop_server() -> bool:
 
     # Wait for port to free up
     for _ in range(10):
-        if not http_ok("/", timeout=0.5):
+        if not http_reachable("/", timeout=0.5):
             # Clean PID file
             pid_path = os.path.join(os.getcwd(), "webgis.pid")
             if os.path.isfile(pid_path):
@@ -153,7 +157,7 @@ def stop_server() -> bool:
 
 def start_server() -> subprocess.Popen | None:
     port = get_port()
-    if http_ok("/"):
+    if http_reachable("/"):
         print(f"  Server already running on port {port}.")
         return None
 

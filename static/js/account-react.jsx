@@ -112,7 +112,7 @@ function AccountApp() {
 
     function backToMain() {
         if (!user) return;
-        window.location.href = user.user_type === "admin" ? "/admin" : "/";
+        window.location.href = api.isAdminType(user.user_type) ? "/admin" : "/";
     }
 
     function toggleThemeMode() {
@@ -166,7 +166,7 @@ function AccountApp() {
                                 </div>
                             )}
                             <div className="mt-1 text-xs font-semibold text-slate-600">
-                                角色：{user.is_guest ? "访客" : user.user_type === "admin" ? "管理员" : "普通账户"}
+                                角色：{user.is_guest ? "访客" : api.userTypeLabel(user.user_type)}
                             </div>
                             {user.must_change_password && (
                                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-bold text-amber-700">

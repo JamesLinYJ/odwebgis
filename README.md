@@ -1,4 +1,4 @@
-﻿# WebGIS OD 流向系统（简体中文）
+# WebGIS OD 流向系统（简体中文）
 
 一个包含前端交互与后端 API 的完整 WebGIS OD 应用，提供：
 
@@ -84,13 +84,13 @@ python webgisctl.py check
 python webgisctl.py stop
 ```
 
-## 4. 系统后台管理账号与默认管理员
+## 4. 系统后台管理账号与默认超级管理员
 
 - 系统后台账号（可选）仍支持环境变量：
   - `WEBGIS_SYSTEM_ADMIN_ACCOUNT`
   - `WEBGIS_SYSTEM_ADMIN_PASSWORD` 或 `WEBGIS_SYSTEM_ADMIN_PASSWORD_SHA256`
-- 统一部署脚本会自动创建一个默认管理员网页账号（可自定义用户名和密码）。
-- 如未手动指定默认管理员密码，部署脚本会自动生成并在终端输出一次。
+- 统一部署脚本会自动创建一个默认超级管理员网页账号（可自定义用户名和密码）。
+- 如未手动指定默认超级管理员密码，部署脚本会自动生成并在终端输出一次。
 - 当前数据库结构使用 `users.username` 作为唯一登录名，已不再使用 `student_no`。
 
 ## 5. 命令行账户管理（系统后台无需网页登录）
@@ -100,9 +100,9 @@ python webgisctl.py stop
 ```bash
 python manage_accounts.py list
 python manage_accounts.py show --username zhangsan
-python manage_accounts.py create --name 张三 --username zhangsan --user-type student --password "Abc!2345"
+python manage_accounts.py create --name 张三 --username zhangsan --user-type normal_user --password "Abc!2345"
 python manage_accounts.py update --username zhangsan --name "张三(一班)" --status online
-python manage_accounts.py set-role --username zhangsan --user-type admin
+python manage_accounts.py set-role --username zhangsan --user-type super_admin
 python manage_accounts.py reset-password --username zhangsan --password "XyZ#998877"
 python manage_accounts.py unlock --username zhangsan
 python manage_accounts.py stats
@@ -209,3 +209,4 @@ python webgisctl.py clean all
 - `webgis_deploy`
 - `webgis_clean`
 - `webgis_uninstall`
+

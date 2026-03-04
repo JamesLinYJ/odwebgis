@@ -1,4 +1,4 @@
-const { useEffect, useMemo, useState } = React;
+const { useEffect, useMemo, useRef, useState } = React;
 
 function PasswordStrengthBar({ password, username = "" }) {
     const info = useMemo(() => api.passwordStrength(password, username), [password, username]);
@@ -30,6 +30,9 @@ function PasswordStrengthBar({ password, username = "" }) {
 function AuthApp() {
     const [tab, setTab] = useState("login");
     const [loading, setLoading] = useState(false);
+    const loginFormRef = useRef(null);
+    const registerFormRef = useRef(null);
+    const guestFormRef = useRef(null);
     const [loginForm, setLoginForm] = useState({ username: "", password: "" });
     const [guestForm, setGuestForm] = useState({ name: "" });
     const [registerForm, setRegisterForm] = useState({
@@ -44,12 +47,43 @@ function AuthApp() {
             .then((res) => {
                 const user = res.user || null;
                 if (!user) return;
-                window.location.href = user.user_type === "admin" ? "/admin" : "/";
+                window.location.href = api.isAdminType(user.user_type) ? "/admin" : "/";
             })
             .catch(() => {
                 // ignore
             });
     }, []);
+
+    useEffect(() => {
+        const onKeyDown = (event) => {
+            if (event.key !== "Enter") return;
+            if (event.isComposing || event.keyCode === 229) return;
+            if (loading) return;
+
+            const target = event.target;
+            const tagName = String(target?.tagName || "").toUpperCase();
+            const typeName = String(target?.getAttribute?.("type") || "").toLowerCase();
+            if (tagName === "TEXTAREA") return;
+            if (typeName === "button" || typeName === "submit") return;
+
+            const formNode = tab === "login"
+                ? loginFormRef.current
+                : tab === "register"
+                    ? registerFormRef.current
+                    : guestFormRef.current;
+            if (!formNode) return;
+
+            event.preventDefault();
+            if (typeof formNode.requestSubmit === "function") {
+                formNode.requestSubmit();
+                return;
+            }
+            formNode.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        };
+
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [tab, loading]);
 
     async function submitLogin(e) {
         e.preventDefault();
@@ -162,6 +196,7 @@ function AuthApp() {
 
                     <div className="grid min-h-[300px] overflow-hidden sm:min-h-[340px]">
                         <form
+                            ref={loginFormRef}
                             onSubmit={submitLogin}
                             className={`ios-tab-pane ${tab === "login" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-left pointer-events-none"}`}
                             style={{ position: "relative", gridArea: "1 / 1" }}
@@ -198,6 +233,7 @@ function AuthApp() {
                         </form>
 
                         <form
+                            ref={registerFormRef}
                             onSubmit={submitRegister}
                             className={`ios-tab-pane ${tab === "register" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-right pointer-events-none"}`}
                             style={{ position: "relative", gridArea: "1 / 1" }}
@@ -258,6 +294,7 @@ function AuthApp() {
                         </form>
 
                         <form
+                            ref={guestFormRef}
                             onSubmit={submitGuest}
                             className={`ios-tab-pane ${tab === "guest" ? "ios-tab-pane-active" : "ios-tab-pane-hidden-right pointer-events-none"}`}
                             style={{ position: "relative", gridArea: "1 / 1" }}

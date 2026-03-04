@@ -464,107 +464,269 @@ html.theme-dark .bg-white,
 body.theme-dark .bg-white {
     background-color: rgba(15, 23, 42, 0.9) !important;
 }
+
 html.theme-dark .bg-white\/95,
 body.theme-dark .bg-white\/95 {
     background-color: rgba(15, 23, 42, 0.86) !important;
 }
+
 html.theme-dark .bg-white\/90,
 body.theme-dark .bg-white\/90 {
     background-color: rgba(15, 23, 42, 0.8) !important;
 }
+
 html.theme-dark .bg-white\/92,
 body.theme-dark .bg-white\/92 {
     background-color: rgba(15, 23, 42, 0.84) !important;
 }
+
 html.theme-dark .bg-white\/80,
 body.theme-dark .bg-white\/80 {
     background-color: rgba(15, 23, 42, 0.72) !important;
 }
+
 html.theme-dark .bg-white\/75,
 body.theme-dark .bg-white\/75 {
     background-color: rgba(15, 23, 42, 0.68) !important;
 }
+
 html.theme-dark .bg-white\/70,
 body.theme-dark .bg-white\/70 {
     background-color: rgba(15, 23, 42, 0.65) !important;
 }
+
 html.theme-dark .bg-white\/60,
 body.theme-dark .bg-white\/60 {
     background-color: rgba(15, 23, 42, 0.56) !important;
 }
+
 html.theme-dark .bg-blue-50,
 body.theme-dark .bg-blue-50 {
     background-color: rgba(30, 41, 59, 0.78) !important;
 }
+
 html.theme-dark .bg-blue-50\/40,
 body.theme-dark .bg-blue-50\/40 {
     background-color: rgba(30, 41, 59, 0.5) !important;
 }
+
 html.theme-dark .bg-blue-50\/50,
 body.theme-dark .bg-blue-50\/50 {
     background-color: rgba(30, 41, 59, 0.58) !important;
 }
+
 html.theme-dark .bg-blue-50\/70,
 body.theme-dark .bg-blue-50\/70 {
     background-color: rgba(30, 41, 59, 0.72) !important;
 }
+
+html.theme-dark .bg-blue-50\/80,
+body.theme-dark .bg-blue-50\/80 {
+    background-color: rgba(30, 41, 59, 0.88) !important;
+}
+
 html.theme-dark .bg-blue-100,
 body.theme-dark .bg-blue-100 {
     background-color: rgba(30, 58, 138, 0.34) !important;
 }
+
 html.theme-dark .bg-blue-100\/70,
 body.theme-dark .bg-blue-100\/70 {
     background-color: rgba(30, 58, 138, 0.28) !important;
 }
+
 html.theme-dark .border-blue-100,
 body.theme-dark .border-blue-100 {
     border-color: rgba(71, 85, 105, 0.7) !important;
 }
+
 html.theme-dark .border-blue-100\/80,
 body.theme-dark .border-blue-100\/80 {
     border-color: rgba(71, 85, 105, 0.76) !important;
 }
+
 html.theme-dark .border-blue-200,
 body.theme-dark .border-blue-200 {
     border-color: rgba(100, 116, 139, 0.8) !important;
 }
+
 html.theme-dark .border-admin-200,
 body.theme-dark .border-admin-200 {
     border-color: rgba(96, 165, 250, 0.52) !important;
 }
+
 html.theme-dark .border-admin-300,
 body.theme-dark .border-admin-300 {
     border-color: rgba(96, 165, 250, 0.66) !important;
 }
+
 html.theme-dark .text-slate-800,
 body.theme-dark .text-slate-800 {
     color: #e2e8f0 !important;
 }
+
 html.theme-dark .text-slate-700,
 body.theme-dark .text-slate-700 {
     color: #cbd5e1 !important;
 }
+
 html.theme-dark .text-slate-600,
 body.theme-dark .text-slate-600 {
     color: #94a3b8 !important;
 }
+
 html.theme-dark .text-slate-500,
 body.theme-dark .text-slate-500 {
     color: #94a3b8 !important;
 }
+
 html.theme-dark .text-slate-400,
 body.theme-dark .text-slate-400 {
     color: #64748b !important;
 }
+
 html.theme-dark .text-brand-700,
 body.theme-dark .text-brand-700,
 html.theme-dark .text-admin-600,
 body.theme-dark .text-admin-600 {
     color: #93c5fd !important;
 }
+
 html.theme-dark .shadow-soft,
 body.theme-dark .shadow-soft {
     box-shadow: 0 10px 30px rgba(2, 6, 23, 0.52) !important;
+}
+
+/* 深色主题：补充覆盖（修复浅色残留） */
+html.theme-dark .bg-slate-50,
+body.theme-dark .bg-slate-50 {
+    background-color: rgba(30, 41, 59, 0.76) !important;
+}
+
+html.theme-dark .bg-slate-200,
+body.theme-dark .bg-slate-200 {
+    background-color: rgba(71, 85, 105, 0.62) !important;
+}
+
+html.theme-dark .bg-admin-50,
+body.theme-dark .bg-admin-50 {
+    background-color: rgba(30, 58, 138, 0.32) !important;
+}
+
+html.theme-dark .bg-amber-50,
+body.theme-dark .bg-amber-50 {
+    background-color: rgba(120, 53, 15, 0.34) !important;
+}
+
+html.theme-dark .bg-rose-50,
+body.theme-dark .bg-rose-50 {
+    background-color: rgba(136, 19, 55, 0.34) !important;
+}
+
+html.theme-dark .bg-rose-100,
+body.theme-dark .bg-rose-100 {
+    background-color: rgba(159, 18, 57, 0.36) !important;
+}
+
+html.theme-dark .bg-sky-50,
+body.theme-dark .bg-sky-50 {
+    background-color: rgba(12, 74, 110, 0.35) !important;
+}
+
+html.theme-dark .border-slate-200,
+body.theme-dark .border-slate-200 {
+    border-color: rgba(100, 116, 139, 0.72) !important;
+}
+
+html.theme-dark .border-amber-200,
+body.theme-dark .border-amber-200 {
+    border-color: rgba(217, 119, 6, 0.52) !important;
+}
+
+html.theme-dark .border-rose-200,
+body.theme-dark .border-rose-200 {
+    border-color: rgba(225, 29, 72, 0.5) !important;
+}
+
+html.theme-dark .border-sky-200,
+body.theme-dark .border-sky-200 {
+    border-color: rgba(14, 165, 233, 0.5) !important;
+}
+
+html.theme-dark .text-rose-600,
+body.theme-dark .text-rose-600 {
+    color: #fda4af !important;
+}
+
+html.theme-dark .text-amber-700,
+body.theme-dark .text-amber-700 {
+    color: #fcd34d !important;
+}
+
+html.theme-dark .text-sky-700,
+body.theme-dark .text-sky-700 {
+    color: #7dd3fc !important;
+}
+
+html.theme-dark .bg-gradient-to-br,
+body.theme-dark .bg-gradient-to-br {
+    background-image: linear-gradient(135deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.8)) !important;
+}
+
+html.theme-dark .map-floating-panel,
+body.theme-dark .map-floating-panel,
+html.theme-dark .map-detail-card,
+body.theme-dark .map-detail-card {
+    background: rgba(15, 23, 42, 0.92) !important;
+    border-color: rgba(71, 85, 105, 0.78) !important;
+}
+
+html.theme-dark .map-tool-stack .ios-card,
+body.theme-dark .map-tool-stack .ios-card,
+html.theme-dark .map-tool-stack button,
+body.theme-dark .map-tool-stack button {
+    background-color: rgba(15, 23, 42, 0.86) !important;
+    color: #bfdbfe !important;
+    border-color: rgba(71, 85, 105, 0.78) !important;
+}
+
+html.theme-dark .ios-tab-switch,
+body.theme-dark .ios-tab-switch {
+    background: rgba(30, 41, 59, 0.7) !important;
+}
+
+html.theme-dark .btn-primary,
+body.theme-dark .btn-primary {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35) !important;
+}
+
+html.theme-dark .leaflet-control-scale-line,
+body.theme-dark .leaflet-control-scale-line {
+    color: #bfdbfe !important;
+    border-color: rgba(148, 163, 184, 0.9) !important;
+    background: rgba(15, 23, 42, 0.86) !important;
+}
+
+html.theme-dark .leaflet-tooltip.od-line-label,
+body.theme-dark .leaflet-tooltip.od-line-label {
+    background: rgba(15, 23, 42, 0.88) !important;
+    color: #e2e8f0 !important;
+    border-color: rgba(96, 165, 250, 0.45) !important;
+}
+
+html.theme-dark .leaflet-tooltip.od-point-label,
+body.theme-dark .leaflet-tooltip.od-point-label {
+    background: rgba(15, 23, 42, 0.82) !important;
+    color: #cbd5e1 !important;
+    border-color: rgba(71, 85, 105, 0.7) !important;
+}
+
+html.theme-dark .leaflet-tooltip.od-distance-label,
+body.theme-dark .leaflet-tooltip.od-distance-label {
+    background: rgba(30, 27, 75, 0.88) !important;
+    color: #a5b4fc !important;
+    border-color: rgba(99, 102, 241, 0.45) !important;
 }
 
 /* 全局主题切换按钮 */
