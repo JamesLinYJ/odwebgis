@@ -1,59 +1,144 @@
-# WebGIS OD 流向系统（简体中文）
+# WebGIS OD 平台（简体中文）
 
-一个包含前端交互与后端 API 的完整 WebGIS OD 应用，提供：
+一个用于教学与演示的 WebGIS OD 系统，包含：
 
-- OD 地图探索端（亮色风格）
-- 管理员后台（用户管理 + 可视化分析）
-- 独立注册/登录页面（`/auth`）
-- 手动录入（支持坐标或 O/D 代码）
-- CSV 批量上传入库
-- 一键导出美观 OD 图（PNG / SVG）
-- 枢纽节点管理
-- 实时统计、区域负载、告警与趋势图
-- 用户数据 CSV 导出
+- 账户体系（注册、登录、访客）
+- OD 线路录入与可视化
+- 管理后台（账户管理、线路管理、统计与导出）
+- 天地图底图（通过后端代理，前端不直出 API Key）
 
-前端技术：
+本仓库已统一脚本命名（`.sh` / `.bat` 同名），支持 Windows、Linux、WSL。
 
-- React 18（本地静态文件）
-- Tailwind CSS（本地编译生成 CSS）
-- Leaflet 地图与热力图插件
-- MiSans（本地字体文件）
+---
 
-## 1. 环境要求
+## 1. 功能概览
+
+### 1.1 前台（普通用户 / 访客）
+
+- 地图点选 O/D
+- 十进制度与度分秒输入
+- GCJ-02 / WGS84 互转录入（内部统一存储 WGS84）
+- OD 线路保存与查看
+
+### 1.2 后台（管理员）
+
+- 账户列表与筛选
+- 账户增删改、重置密码、查看登录 IP 记录
+- 按账户筛选线路，支持批量操作
+- 导出账户列表与 OD 图
+
+### 1.3 角色模型（当前版本）
+
+- `normal_user`：普通用户
+- `admin`：管理员（受限管理）
+- `super_admin`：超级管理员
+- 系统后台账号（环境变量控制，不入库）
+
+权限规则（已实现）：
+
+- 普通管理员不能删除管理员/超级管理员账户
+- 普通管理员看不到同权限与更高权限账户
+- 普通管理员导出仅包含可管理账户
+
+---
+
+## 2. 技术栈
+
+- 后端：Flask + SQLite
+- 前端：React（浏览器端）+ Tailwind CSS + Leaflet
+- 字体：MiSans（本地文件）
+- 脚本：`webgisctl.py` + 同名 `.sh/.bat` 包装器
+
+---
+
+## 3. 目录说明
+
+主要目录/文件：
+
+- `app.py`：Flask 主程序（路由、权限、数据库初始化）
+- `webgisctl.py`：统一控制器（setup/build/start/stop/deploy）
+- `manage_accounts.py`：账户命令行管理
+- `manage_map_key.py`：天地图 Key 命令行管理
+- `static/`：前端资源
+- `templates/`：页面模板
+- `webgis.db`：SQLite 数据库
+- `.env.webgis`：运行时环境变量
+- `.tianditu_key`：天地图 Key 本地文件
+
+---
+
+## 4. 环境要求
 
 - Python 3.10+
-- 可访问外网（仅用于底图瓦片；前端库与头像资源均本地化）
-- 天地图 Key（仅后端读取，不在前端暴露）
+- Node.js + npm（用于 Tailwind 构建）
+- Linux/WSL 建议具备 `python3`, `pip`, `npm`
 
-## 2. 安装依赖
+---
 
-```bash
-pip install -r requirements.txt
-```
+## 5. 快速开始（推荐）
 
-## 3. 启动（统一脚本）
-
-先配置天地图 Key（推荐环境变量）：
-
-```powershell
-$env:TIANDITU_API_KEY="你的天地图Key"
-```
-
-也可在项目根目录写入 `./.tianditu_key`（文件内容仅一行 key）。
+### 5.1 一键部署
 
 ```bash
-python webgisctl.py start --open
+python webgisctl.py deploy \
+  --host 0.0.0.0 \
+  --port 5000 \
+  --map-key "你的天地图Key" \
+  --admin-username admin \
+  --admin-password "12345678"
 ```
 
-默认地址：`http://127.0.0.1:5000`
+或使用包装脚本：
 
-- 注册/登录：`/auth`
-- 地图探索端：`/`（需先登录）
-- 管理员后台：`/admin`（学生端不显式展示入口）
+- Linux/WSL：`./webgis_deploy.sh ...`
+- Windows：`webgis_deploy.bat ...`
 
-底图说明：默认由浏览器直连天地图 WMTS（节省服务器带宽，key 在前端可见）。
+部署会自动执行：
 
-### 3.1 命令行配置天地图 Key（推荐）
+1. 建立虚拟环境并安装依赖
+2. 构建前端样式
+3. 写入运行环境
+4. 启动服务
+5. 创建默认 Web 管理账户（角色为 `super_admin`）
+
+### 5.2 启动与停止
+
+```bash
+python webgisctl.py start
+python webgisctl.py stop
+python webgisctl.py restart
+python webgisctl.py check
+```
+
+对应同名脚本：
+
+- `webgis_start.sh` / `webgis_start.bat`
+- `webgis_build.sh` / `webgis_build.bat`
+- `webgis_setup.sh` / `webgis_setup.bat`
+- `webgis_clean.sh` / `webgis_clean.bat`
+- `webgis_uninstall.sh` / `webgis_uninstall.bat`
+
+---
+
+## 6. 访问地址
+
+默认端口 `5000`：
+
+- 登录页：`/auth`
+- 普通页：`/`
+- 管理后台：`/admin`
+- 账户管理：`/admin/accounts`
+
+示例：
+
+- 本机：`http://127.0.0.1:5000/auth`
+- 服务器：`http://<你的服务器IP>:5000/auth`
+
+---
+
+## 7. 天地图 Key 管理
+
+### 7.1 命令行管理
 
 ```bash
 python manage_map_key.py show
@@ -62,151 +147,185 @@ python manage_map_key.py check
 python manage_map_key.py clear
 ```
 
-Windows 可用：
+### 7.2 读取优先级
 
-```bat
-manage_map_key.bat set --key "你的天地图Key"
-```
+1. 环境变量 `TIANDITU_API_KEY`
+2. 本地文件 `.tianditu_key`
 
-Shell 可用：
+---
 
-```bash
-./manage_map_key.sh set --key "你的天地图Key"
-```
+## 8. 账户命令行管理
 
-常用命令（Windows / Linux / WSL 一致）：
-
-```bash
-python webgisctl.py setup
-python webgisctl.py build
-python webgisctl.py restart --open
-python webgisctl.py check
-python webgisctl.py stop
-```
-
-## 4. 系统后台管理账号与默认超级管理员
-
-- 系统后台账号（可选）仍支持环境变量：
-  - `WEBGIS_SYSTEM_ADMIN_ACCOUNT`
-  - `WEBGIS_SYSTEM_ADMIN_PASSWORD` 或 `WEBGIS_SYSTEM_ADMIN_PASSWORD_SHA256`
-- 统一部署脚本会自动创建一个默认超级管理员网页账号（可自定义用户名和密码）。
-- 如未手动指定默认超级管理员密码，部署脚本会自动生成并在终端输出一次。
-- 当前数据库结构使用 `users.username` 作为唯一登录名，已不再使用 `student_no`。
-
-## 5. 命令行账户管理（系统后台无需网页登录）
-
-可直接操作数据库账户（增删改查、更新资料、重置密码、改角色、解锁、统计）：
+### 8.1 常用命令
 
 ```bash
 python manage_accounts.py list
-python manage_accounts.py show --username zhangsan
-python manage_accounts.py create --name 张三 --username zhangsan --user-type normal_user --password "Abc!2345"
-python manage_accounts.py update --username zhangsan --name "张三(一班)" --status online
-python manage_accounts.py set-role --username zhangsan --user-type super_admin
-python manage_accounts.py reset-password --username zhangsan --password "XyZ#998877"
-python manage_accounts.py unlock --username zhangsan
-python manage_accounts.py stats
-python manage_accounts.py delete --username zhangsan
+python manage_accounts.py show --username admin
+python manage_accounts.py create --name 管理员 --username admin --user-type super_admin --password "12345678"
+python manage_accounts.py update --username admin --status online
+python manage_accounts.py set-role --username user01 --user-type normal_user
+python manage_accounts.py reset-password --username user01 --password "new_password"
+python manage_accounts.py unlock --username user01
+python manage_accounts.py delete --username user01
+python manage_accounts.py stats --json
 ```
 
-重建新版数据库结构（会清空旧数据，不兼容旧库）：
+### 8.2 角色参数
+
+`--user-type` 仅支持：
+
+- `normal_user`
+- `admin`
+- `super_admin`
+
+当前版本不兼容旧参数 `student`。
+
+---
+
+## 9. 环境变量
+
+常用环境变量：
+
+- `WEBGIS_HOST`
+- `WEBGIS_PORT`
+- `WEBGIS_SECRET_KEY`（强烈建议生产环境设置）
+- `TIANDITU_API_KEY`
+- `WEBGIS_SYSTEM_ADMIN_ACCOUNT`
+- `WEBGIS_SYSTEM_ADMIN_PASSWORD`
+- `WEBGIS_SYSTEM_ADMIN_PASSWORD_SHA256`
+
+说明：
+
+- `WEBGIS_SYSTEM_ADMIN_*` 为系统后台账号（不写入数据库）。
+- Web 登录账户（admin 等）仍在数据库中管理。
+
+---
+
+## 10. 数据库与数据重建说明（重要）
+
+本项目当前处于快速迭代阶段，数据库结构版本不兼容旧版本。
+
+当 `SCHEMA_VERSION` 变化时，服务启动会重建表结构并清空旧数据。
+
+如需手动重建：
 
 ```bash
 python manage_accounts.py reset-schema
 ```
 
-Windows 也可用：
+正式上线前请务必接入备份策略。
 
-```bat
-manage_accounts.bat list
-```
+---
 
-## 6. 主要接口
+## 11. API 清单（核心）
 
-- `GET /api/routes` 查询路线
-- `POST /api/routes` 新增路线
-- `DELETE /api/routes/{id}` 删除路线
-- `POST /api/routes/batch` 批量 CSV 导入
-- `GET /api/routes/template` 下载 CSV 模板
-- `GET /api/nodes` 枢纽节点列表
-- `POST /api/nodes` 新增节点
-- `GET /api/users` 用户查询
-- `POST /api/auth/register` 注册
-- `POST /api/auth/login` 登录
-- `POST /api/auth/logout` 退出
-- `GET /api/auth/me` 当前登录用户
-- `POST /api/students/register` 学生注册（兼容接口）
-- `GET /api/users/{id}/summary` 用户详情与路线
-- `GET /api/stats/overview` 总览统计
-- `GET /api/admin/overview` 管理员全局总览
-- `DELETE /api/admin/accounts/{id}` 管理员删除账户（同时删除该账户全部路线）
-- `DELETE /api/admin/accounts/{id}/routes` 管理员仅删除某账户全部路线
-- `GET /api/admin/region-load` 区域负载
-- `GET /api/admin/hourly` 小时趋势
-- `GET /api/alerts` 告警列表
-- `GET /api/export/users-csv` 导出用户 CSV
+### 11.1 认证
 
-## 7. CSV 模板字段
+- `GET /api/auth/me`
+- `POST /api/auth/register`
+- `POST /api/auth/guest-login`
+- `POST /api/auth/login`
+- `POST /api/auth/logout`
+- `POST /api/auth/change-password`
 
-`origin_code,origin_name,origin_lat,origin_lon,destination_code,destination_name,destination_lat,destination_lon,category,user_id`
+### 11.2 路线与节点
 
-说明：
+- `GET /api/routes`
+- `POST /api/routes`
+- `DELETE /api/routes/<id>`
+- `POST /api/routes/batch`
+- `GET /api/routes/template`
+- `GET /api/nodes`
+- `POST /api/nodes`
 
-- 起点和终点均支持“代码或坐标”任意一种方式。
-- 当填写代码时，会从 `nodes` 节点表自动解析坐标。
+### 11.3 管理与统计
 
-## 8. 数据存储
+- `GET /api/admin/overview`
+- `GET /api/admin/accounts`
+- `POST /api/admin/accounts`
+- `DELETE /api/admin/accounts/<id>`
+- `DELETE /api/admin/accounts/<id>/routes`
+- `POST /api/admin/accounts/<id>/reset-password`
+- `GET /api/admin/accounts/<id>/login-history`
+- `GET /api/admin/region-load`
+- `GET /api/admin/hourly`
+- `GET /api/stats/overview`
 
-程序首次启动会自动创建 `webgis.db`，默认不写入任何预设数据。
+### 11.4 导出
 
-## 9. 本地前端依赖说明（无 CDN）
+- `GET /api/export/accounts-csv`
+- `GET /api/export/users-csv`（兼容别名）
 
-- 第三方前端依赖全部位于 `static/vendor/`
-- Tailwind 通过本地二进制编译，输出文件：`static/css/tailwind.generated.css`
-- MiSans 字体位于 `static/fonts/misans/`，样式文件为 `static/css/misans.css`
-- 重新生成 Tailwind CSS：
+### 11.5 地图瓦片代理
 
-```bash
-tools/tailwindcss.exe -i static/css/tailwind.input.css -o static/css/tailwind.generated.css --minify
-```
+- `GET /api/map/tile/<layer>/<z>/<x>/<y>`
 
-也可使用同名脚本入口：
+---
+
+## 12. 服务器更新流程（GitHub 拉取）
 
 ```bash
+cd /opt/odwebgis
+git fetch origin main
+git checkout main
+git pull --ff-only origin main
+
+./webgis_setup.sh
 ./webgis_build.sh
+./webgis_start.sh --restart
 ```
 
-## 10. 一键部署（统一）
-
-完整一键部署（安装依赖、编译 Tailwind、配置 Key、启动服务、创建默认管理员）：
+若需重置管理员：
 
 ```bash
-python webgisctl.py deploy --map-key "你的天地图Key"
+python manage_accounts.py create --name 管理员 --username admin --user-type super_admin --password "12345678" || true
+python manage_accounts.py update --username admin --user-type super_admin
+python manage_accounts.py reset-password --username admin --password "12345678"
 ```
 
-可选参数：
+---
+
+## 13. 故障排查
+
+### 13.1 登录报“密码加密格式无效”
+
+- 前端需发送 `sha256:<64位hex>` 格式密码摘要。
+- 页面脚本未加载完整时会触发此问题，先清浏览器缓存并检查控制台。
+
+### 13.2 页面空白或样式错乱
+
+- 先执行：
+  - `python webgisctl.py build`
+  - `python webgisctl.py restart`
+- 检查静态资源是否 200：
+  - `/static/js/*`
+  - `/static/css/*`
+
+### 13.3 服务端口被占用
 
 ```bash
-python webgisctl.py deploy \
-  --map-key "你的天地图Key" \
-  --host 0.0.0.0 \
-  --port 5000 \
-  --admin-username admin \
-  --admin-password "Your#Admin#Pass123!"
+python webgisctl.py stop
+python webgisctl.py start --port 5001
 ```
 
-清理：
+### 13.4 天地图不显示
 
-```bash
-python webgisctl.py clean runtime
-python webgisctl.py clean all
-```
+- 确认 Key 有效：`python manage_map_key.py check`
+- 检查服务端网络可访问天地图
 
-同名脚本入口（`.sh` / `.bat`）：
-- `webgis_setup`
-- `webgis_build`
-- `webgis_start`
-- `webgis_deploy`
-- `webgis_clean`
-- `webgis_uninstall`
+---
+
+## 14. 安全建议（生产）
+
+- 设置强随机 `WEBGIS_SECRET_KEY`
+- 使用 HTTPS（Nginx/Caddy 反代）
+- 限制数据库文件读写权限
+- 周期性备份 `webgis.db`
+- 管理员密码不要使用弱口令
+
+---
+
+## 15. 许可证与说明
+
+本仓库用于教学演示与研究开发。上线生产前，请完成安全评估、压测与审计。
 
