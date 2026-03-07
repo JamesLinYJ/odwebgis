@@ -103,6 +103,39 @@ function routeBrief(route) {
     return `${route.origin_name} -> ${route.destination_name}`;
 }
 
+function getRouteUserLabel(studentName, username) {
+    const cleanUsername = (username || "").trim();
+    const cleanName = (studentName || "").trim();
+    return cleanUsername || cleanName || "未知用户";
+}
+
+function buildRouteHoverLabel(kind, route, userLabel) {
+    if (kind === "origin") {
+        return `<strong>${userLabel}</strong><br/>起点：${route.origin_name}`;
+    }
+    if (kind === "destination") {
+        return `<strong>${userLabel}</strong><br/>终点：${route.destination_name}`;
+    }
+    return `<strong>${userLabel}</strong><br/>${route.origin_name} -> ${route.destination_name}`;
+}
+
+function buildRouteLabelSpecs({ enabled, userLabel, from }) {
+    if (!enabled) return [];
+    return [{
+        text: userLabel,
+        latlng: from,
+        direction: "top",
+        offset: [0, -8],
+        className: "od-point-label od-user-label",
+    }];
+}
+
+function bindHoverMotion(layer, onEnter, onLeave) {
+    if (!layer || typeof layer.on !== "function") return;
+    layer.on("mouseover", onEnter);
+    layer.on("mouseout", onLeave);
+}
+
 const EXPORT_QUALITY_PRESETS = {
     standard: {
         width: 1600,
@@ -216,7 +249,7 @@ function AdminApp() {
     const [selectedRouteIds, setSelectedRouteIds] = useState([]);
     const [routeCategory, setRouteCategory] = useState("all");
     const [routeKeyword, setRouteKeyword] = useState("");
-    const [lineLabelMode, setLineLabelMode] = useState("name");
+    const [lineLabelMode, setLineLabelMode] = useState("label");
     const [baseMapMode, setBaseMapMode] = useState("vector");
     const [mapFullscreen, setMapFullscreen] = useState(false);
     const [exportingPoster, setExportingPoster] = useState(false);
@@ -581,6 +614,33 @@ function AdminApp() {
                 white-space: nowrap;
             }
             .leaflet-tooltip.od-point-label:before { display: none; }
+            .leaflet-tooltip.od-user-label {
+                font-size: 11px;
+                font-weight: 700;
+                color: #1e3a8a;
+                border-color: #bfdbfe;
+                box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14);
+            }
+            .leaflet-tooltip.od-hover-label {
+                border: 1px solid rgba(148, 163, 184, 0.28);
+                background:
+                    linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(30, 41, 59, 0.88));
+                color: #f8fafc;
+                font-size: 11px;
+                font-weight: 600;
+                line-height: 1.35;
+                letter-spacing: 0.01em;
+                border-radius: 10px;
+                padding: 5px 9px;
+                box-shadow:
+                    0 12px 28px rgba(15, 23, 42, 0.24),
+                    0 2px 10px rgba(59, 130, 246, 0.12);
+                backdrop-filter: blur(8px);
+                white-space: nowrap;
+                opacity: 0.98;
+                animation: odTooltipFadeIn 120ms ease-out;
+            }
+            .leaflet-tooltip.od-hover-label:before { display: none; }
             .leaflet-tooltip.od-distance-label {
                 border: 1px solid #e0e7ff;
                 background: rgba(238, 242, 255, 0.94);
@@ -592,6 +652,14 @@ function AdminApp() {
                 box-shadow: 0 2px 6px rgba(99, 102, 241, 0.18);
             }
             .leaflet-tooltip.od-distance-label:before { display: none; }
+            @keyframes odTooltipFadeIn {
+                from {
+                    opacity: 0;
+                }
+                to {
+                    opacity: 1;
+                }
+            }
         `;
         document.head.appendChild(style);
     }, []);
@@ -678,16 +746,15 @@ function AdminApp() {
         if (!routeLayerRef.current) return;
         routeLayerRef.current.clearLayers();
 
-        const mode = lineLabelMode;
         const hasExplicitSelection = explicitSelectedUserIdSet.size > 0 || selectedRouteIdSet.size > 0;
-        // Throttle detailed labels when too many routes
-        const effectiveMode = activeRoutes.length > 300 && (mode === "full" || mode === "od") ? "name" : mode;
+        const showPermanentLabel = lineLabelMode === "label";
 
         activeRoutes.forEach((route) => {
             const uid = Number(route.user_id);
             const userInfo = userMap.get(uid);
             const studentName = userInfo?.name || route.user_name || "未知用户";
             const username = userInfo?.username || "";
+            const userLabel = getRouteUserLabel(studentName, username);
 
             const isFocusUser = selectedUserId && uid === Number(selectedUserId);
             const isMultiSelectedUser = selectedUserIdSet.has(uid);
@@ -701,14 +768,33 @@ function AdminApp() {
             const to = [route.destination_lat, route.destination_lon];
             const curve = buildCurve(from, to);
             const distKm = haversineKm(from[0], from[1], to[0], to[1]);
-
-            // — Arc line —
-            const line = L.polyline(curve, {
+            const originRadius = emphasize ? 3.5 : isMultiSelectedUser ? 3 : 2.5;
+            const destinationRadius = emphasize ? 4.6 : isMultiSelectedUser ? 4 : 3.6;
+            const lineBaseStyle = {
                 color,
                 weight,
                 opacity,
                 dashArray: emphasize ? "9 6" : isMultiSelectedUser ? "8 7" : "7 8",
-            }).addTo(routeLayerRef.current);
+                interactive: false,
+            };
+            const lineHoverStyle = {
+                weight: weight + 1,
+                opacity: Math.min(1, opacity + 0.2),
+            };
+            const lineHitStyle = {
+                color,
+                weight: Math.max(18, weight + 14),
+                opacity: 0.01,
+                dashArray: null,
+                lineCap: "round",
+                lineJoin: "round",
+                interactive: true,
+                bubblingMouseEvents: false,
+            };
+
+            // — Arc line —
+            const line = L.polyline(curve, lineBaseStyle).addTo(routeLayerRef.current);
+            const lineHit = L.polyline(curve, lineHitStyle).addTo(routeLayerRef.current);
 
             // — Direction arrow at 90% of curve —
             if (emphasize || isMultiSelectedUser) {
@@ -723,26 +809,46 @@ function AdminApp() {
                 L.marker([arrow.lat, arrow.lon], { icon: arrowIcon, interactive: false }).addTo(routeLayerRef.current);
             }
 
-            // — Line label (mid-arc) —
-            const shouldLabel = hasExplicitSelection && (isRouteSelected || explicitSelectedUserIdSet.has(uid));
-            if (effectiveMode !== "none" && shouldLabel) {
-                let labelText = "";
-                if (effectiveMode === "name") labelText = studentName;
-                else if (effectiveMode === "od") labelText = `${route.origin_name} → ${route.destination_name}`;
-                else if (effectiveMode === "full") labelText = `${studentName} | ${route.origin_name} → ${route.destination_name} | ${route.category}`;
-                else if (effectiveMode === "distance") labelText = formatKm(distKm);
-
-                if (labelText) {
-                    line.bindTooltip(labelText, {
-                        permanent: true,
-                        direction: "center",
-                        className: effectiveMode === "distance" ? "od-distance-label" : "od-line-label",
-                    });
+            lineHit.bindTooltip(buildRouteHoverLabel("line", route, userLabel), {
+                sticky: true,
+                direction: "top",
+                className: "od-hover-label",
+                offset: [0, -6],
+            });
+            bindHoverMotion(
+                lineHit,
+                () => {
+                    line.setStyle(lineHoverStyle);
+                    if (typeof line.bringToFront === "function") line.bringToFront();
+                },
+                () => {
+                    line.setStyle(lineBaseStyle);
                 }
+            );
+
+            const shouldLabel = hasExplicitSelection && (isRouteSelected || explicitSelectedUserIdSet.has(uid));
+            if (showPermanentLabel && shouldLabel) {
+                const labelSpecs = buildRouteLabelSpecs({
+                    enabled: true,
+                    userLabel,
+                    from,
+                });
+                labelSpecs.forEach((spec) => {
+                    L.tooltip({
+                        permanent: true,
+                        direction: spec.direction,
+                        className: spec.className,
+                        offset: spec.offset,
+                    })
+                        .setContent(spec.text)
+                        .setLatLng(spec.latlng)
+                        .addTo(routeLayerRef.current);
+                });
             }
 
+
             // — Popup with distance —
-            line.bindPopup(
+            lineHit.bindPopup(
                 `<div style="min-width:220px">` +
                 `<strong>${route.origin_name} → ${route.destination_name}</strong><br/>` +
                 `录入用户：${studentName}${username ? ` (${username})` : ""}<br/>` +
@@ -753,38 +859,88 @@ function AdminApp() {
             );
 
             // — Origin marker (hollow diamond) —
-            L.circleMarker(from, {
-                radius: emphasize ? 3.5 : isMultiSelectedUser ? 3 : 2.5,
+            const originMarker = L.circleMarker(from, {
+                radius: originRadius,
                 color,
                 fillColor: "#ffffff",
                 fillOpacity: 0.8,
                 weight: emphasize ? 2 : 1.5,
+                interactive: false,
             }).addTo(routeLayerRef.current);
+            const originHit = L.circleMarker(from, {
+                radius: Math.max(14, originRadius + 10),
+                color,
+                opacity: 0.01,
+                fillColor: color,
+                fillOpacity: 0.01,
+                weight: 8,
+                bubblingMouseEvents: false,
+            }).addTo(routeLayerRef.current);
+            originHit.bindTooltip(buildRouteHoverLabel("origin", route, userLabel), {
+                sticky: true,
+                direction: "left",
+                className: "od-hover-label",
+                offset: [-12, 0],
+            });
+            bindHoverMotion(
+                originHit,
+                () => {
+                    originMarker.setStyle({
+                        weight: (emphasize ? 2 : 1.5) + 0.5,
+                        fillOpacity: 0.95,
+                        color: "#2563eb",
+                    });
+                },
+                () => {
+                    originMarker.setStyle({
+                        weight: emphasize ? 2 : 1.5,
+                        fillOpacity: 0.8,
+                        color,
+                    });
+                }
+            );
 
             // — Destination marker (filled with white stroke) —
-            L.circleMarker(to, {
-                radius: emphasize ? 4.6 : isMultiSelectedUser ? 4 : 3.6,
+            const destinationMarker = L.circleMarker(to, {
+                radius: destinationRadius,
                 color: "#ffffff",
                 fillColor: color,
                 fillOpacity: emphasize ? 0.95 : isMultiSelectedUser ? 0.85 : 0.75,
                 weight: emphasize ? 1.8 : 1.2,
+                interactive: false,
             }).addTo(routeLayerRef.current);
-
-            // — Endpoint place-name labels (only for selected routes, od/full modes) —
-            if (shouldLabel && (effectiveMode === "od" || effectiveMode === "full")) {
-                if (route.origin_name) {
-                    L.tooltip({ permanent: true, direction: "left", className: "od-point-label", offset: [-6, 0] })
-                        .setContent(route.origin_name)
-                        .setLatLng(from)
-                        .addTo(routeLayerRef.current);
+            const destinationHit = L.circleMarker(to, {
+                radius: Math.max(15, destinationRadius + 10),
+                color,
+                opacity: 0.01,
+                fillColor: color,
+                fillOpacity: 0.01,
+                weight: 8,
+                bubblingMouseEvents: false,
+            }).addTo(routeLayerRef.current);
+            destinationHit.bindTooltip(buildRouteHoverLabel("destination", route, userLabel), {
+                sticky: true,
+                direction: "right",
+                className: "od-hover-label",
+                offset: [12, 0],
+            });
+            bindHoverMotion(
+                destinationHit,
+                () => {
+                    destinationMarker.setStyle({
+                        weight: (emphasize ? 1.8 : 1.2) + 0.6,
+                        fillOpacity: 1,
+                        fillColor: "#2563eb",
+                    });
+                },
+                () => {
+                    destinationMarker.setStyle({
+                        weight: emphasize ? 1.8 : 1.2,
+                        fillOpacity: emphasize ? 0.95 : isMultiSelectedUser ? 0.85 : 0.75,
+                        fillColor: color,
+                    });
                 }
-                if (route.destination_name) {
-                    L.tooltip({ permanent: true, direction: "right", className: "od-point-label", offset: [6, 0] })
-                        .setContent(route.destination_name)
-                        .setLatLng(to)
-                        .addTo(routeLayerRef.current);
-                }
-            }
+            );
         });
     }, [activeRoutes, selectedUserId, selectedUserIdSet, selectedRouteIdSet, explicitSelectedUserIdSet, lineLabelMode, userMap]);
 
@@ -1704,10 +1860,7 @@ function AdminApp() {
                                 className="modern-input mt-1 w-full rounded-xl px-3 py-2 text-xs"
                             >
                                 <option value="none">不显示标注</option>
-                                <option value="name">姓名标注</option>
-                                <option value="od">起点→终点地名</option>
-                                <option value="full">姓名 + 地名 + 分类</option>
-                                <option value="distance">直线距离 (km)</option>
+                                <option value="label">显示标注</option>
                             </select>
 
                             <div className="mt-2 flex items-center justify-between">
