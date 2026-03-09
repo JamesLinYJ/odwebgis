@@ -106,7 +106,7 @@ function routeBrief(route) {
 function getRouteUserLabel(studentName, username) {
     const cleanUsername = (username || "").trim();
     const cleanName = (studentName || "").trim();
-    return cleanUsername || cleanName || "未知用户";
+    return cleanName || cleanUsername || "未知用户";
 }
 
 function buildRouteHoverLabel(kind, route, userLabel) {
@@ -2174,4 +2174,3 @@ if (ReactDOM.createRoot) {
 } else {
     ReactDOM.render(<AdminApp />, adminRootNode);
 }
-
